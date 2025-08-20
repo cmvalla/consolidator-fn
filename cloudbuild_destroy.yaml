@@ -1,0 +1,33 @@
+steps:
+# Run Terraform to destroy the function and its resources
+- name: 'hashicorp/terraform:1.0.0'
+  id: terraform-destroy
+  entrypoint: 'sh'
+  args:
+  - '-c'
+  - |
+    cd terraform
+    terraform init
+    terraform destroy -auto-approve \
+      -var="project_id=${_PROJECT_ID}" \
+      -var="region=${_REGION}" \
+      -var="location=${_LOCATION}" \
+      -var="repository_id=${_REPOSITORY_ID}" \
+      -var="image_name=consolidator-fn" \
+      -var="image_tag=${_TAG}" \
+      -var="redis_host=${_REDIS_HOST}" \
+      -var="redis_port=${_REDIS_PORT}" \
+      -var="spanner_instance=${_SPANNER_INSTANCE}" \
+      -var="spanner_database=${_SPANNER_DATABASE}"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+substitutions:
+  _LOCATION: 'europe-west1'
+  _PROJECT_ID: '${PROJECT_ID}'
+  _REPOSITORY_ID: 'my-docker-repo'
+  _TAG: 'latest'
+  _REDIS_HOST: '127.0.0.1' # Placeholder, will be overridden by Terraform
+  _REDIS_PORT: '6379' # Placeholder, will be overridden by Terraform
+  _SPANNER_INSTANCE: 'my-spanner-instance' # Placeholder, will be overridden by Terraform
+  _SPANNER_DATABASE: 'my-spanner-database' # Placeholder, will be overridden by Terraform
