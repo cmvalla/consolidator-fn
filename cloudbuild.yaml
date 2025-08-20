@@ -26,3 +26,12 @@ images:
 - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/consolidator-fn:${_TAG}'
 options:
   logging: CLOUD_LOGGING_ONLY
+substitutions:
+  _LOCATION: 'europe-west1'
+  _PROJECT_ID: '${PROJECT_ID}'
+  _REPOSITORY_ID: 'my-docker-repo'
+  _TAG: 'latest'
+  _REDIS_HOST: '127.0.0.1' # Placeholder, will be overridden by Terraform
+  _REDIS_PORT: '6379' # Placeholder, will be overridden by Terraform
+  _SPANNER_INSTANCE: 'my-spanner-instance' # Placeholder, will be overridden by Terraform
+  _SPANNER_DATABASE: 'my-spanner-database' # Placeholder, will be overridden by Terraform
