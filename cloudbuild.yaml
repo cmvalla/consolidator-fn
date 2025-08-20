@@ -8,6 +8,15 @@ steps:
   ]
 - name: 'gcr.io/cloud-builders/docker'
   args: ['push', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/consolidator-fn:${_TAG}']
+- name: 'hashicorp/terraform:1.0.0'
+  id: terraform-init
+  entrypoint: 'sh'
+  args:
+  - '-c'
+  - |
+    cd terraform
+    terraform init -backend-config="prefix=cloud-spanner-demo/consolidator/${_PROJECT_SUFFIX}"
+  waitFor: ['push']
 - name: 'gcr.io/cloud-builders/gcloud'
   args:
   - 'functions'
