@@ -7,7 +7,7 @@ steps:
   - '-c'
   - |
     cd terraform
-    terraform init
+    terraform init -backend-config="prefix=cloud-spanner-demo/consolidator/${_PROJECT_SUFFIX}"
     terraform destroy -auto-approve \
       -var="project_id=${_PROJECT_ID}" \
       -var="region=${_REGION}" \
@@ -31,3 +31,4 @@ substitutions:
   _REDIS_PORT: '6379' # Placeholder, will be overridden by Terraform
   _SPANNER_INSTANCE: 'my-spanner-instance' # Placeholder, will be overridden by Terraform
   _SPANNER_DATABASE: 'my-spanner-database' # Placeholder, will be overridden by Terraform
+  _PROJECT_SUFFIX: '' # This will be overridden by the trigger
