@@ -11,16 +11,35 @@ resource "google_cloud_run_v2_service" "consolidator" {
       max_instance_count = 3
     }
     containers {
-      image = "${var.location}-docker.pkg.dev/${var.project_id}/${var.repository_id}/${var.image_name}:${var.image_tag}"
-      ports {
-        container_port = 8080
+        image = "${var.location}-docker.pkg.dev/${var.project_id}/${var.repository_id}/${var.image_name}:${var.image_tag}"
+        ports {
+          container_port = 8080
+        }
+        env {
+          name  = "GOOGLE_CLOUD_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "SPANNER_INSTANCE_ID"
+          value = var.spanner_instance_id
+        }
+        env {
+          name  = "SPANNER_DATABASE_ID"
+          value = var.spanner_database_id
+        }
+        env {
+          name  = "REDIS_HOST"
+          value = var.redis_host
+        }
+        env {
+          name  = "REDIS_PORT"
+          value = var.redis_port
+        }
+        env {
+          name  = "REDIS_PASSWORD"
+          value = var.redis_password
+        }
       }
-      env {
-        name  = "GOOGLE_CLOUD_PROJECT"
-        value = var.project_id
-      }
-      # Add other necessary environment variables here, e.g., for Spanner instance and database names
-    }
   }
 }
 

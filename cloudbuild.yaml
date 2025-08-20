@@ -1,47 +1,64 @@
 steps:
+# Build and tag the Docker image
 - name: 'gcr.io/cloud-builders/docker'
+  id: build
   args: [
     'build',
-    '-t',
-    '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/consolidator-fn:${_TAG}',
+    '--build-arg', 'BASE_IMAGE_LOCATION=${_LOCATION}',
+    '--build-arg', 'PROJECT_ID=${_PROJECT_ID}',
+    '--build-arg', 'REPOSITORY_ID=${_REPOSITORY_ID}',
+    '-t', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID',
+    '-t', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest',
+    '-f', 'Dockerfile',
     '.'
   ]
+
+# Push the images
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['push', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/consolidator-fn:${_TAG}']
+  id: push
+  args: ['push', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}', '--all-tags']
+  waitFor: ['build']
+
+# Run Terraform to deploy the function and its resources
 - name: 'hashicorp/terraform:1.0.0'
-  id: terraform-init
+  id: terraform-deploy
   entrypoint: 'sh'
   args:
   - '-c'
   - |
     cd terraform
-    terraform init -backend-config="prefix=cloud-spanner-demo/consolidator/${_PROJECT_SUFFIX}"
+    terraform init -backend-config="prefix=cloud-spanner-demo/${_PROJECT_SUFFIX}/consolidator"
+    terraform apply -auto-approve \
+      -var="project_id=${_PROJECT_ID}" \
+      -var="region=${_REGION}" \
+      -var="location=${_LOCATION}" \
+      -var="repository_id=${_REPOSITORY_ID}" \
+      -var="image_name=${_IMAGE_NAME}" \
+      -var="image_tag=$BUILD_ID" \
+      -var="topic_name=${_TOPIC_NAME}" \
+      -var="consolidator_sa_email=${_CONSOLIDATOR_SA_EMAIL}" \
+      -var="spanner_instance_id=${_SPANNER_INSTANCE_ID}" \
+      -var="spanner_database_id=${_SPANNER_DATABASE_ID}" \
+      -var="redis_host=${_REDIS_HOST}" \
+      -var="redis_port=${_REDIS_PORT}" \
+      -var="redis_password=${_REDIS_PASSWORD}"
   waitFor: ['push']
-- name: 'gcr.io/cloud-builders/gcloud'
-  args:
-  - 'functions'
-  - 'deploy'
-  - 'consolidator-fn'
-  - '--gen2'
-  - '--region'
-  - '${_LOCATION}'
-  - '--image'
-  - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/consolidator-fn:${_TAG}'
-  - '--trigger-http'
-  - '--no-allow-unauthenticated'
-  - '--set-env-vars'
-  - 'PROJECT_ID=${_PROJECT_ID},LOCATION=${_LOCATION},REDIS_HOST=${_REDIS_HOST},REDIS_PORT=${_REDIS_PORT},SPANNER_INSTANCE=${_SPANNER_INSTANCE},SPANNER_DATABASE=${_SPANNER_DATABASE}'
+
 images:
-- '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/consolidator-fn:${_TAG}'
+- '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID'
+- '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest'
 options:
   logging: CLOUD_LOGGING_ONLY
 substitutions:
   _LOCATION: 'europe-west1'
-  _PROJECT_ID: '${PROJECT_ID}'
   _REPOSITORY_ID: 'my-docker-repo'
-  _TAG: 'latest'
-  _REDIS_HOST: '127.0.0.1' # Placeholder, will be overridden by Terraform
-  _REDIS_PORT: '6379' # Placeholder, will be overridden by Terraform
-  _SPANNER_INSTANCE: 'my-spanner-instance' # Placeholder, will be overridden by Terraform
-  _SPANNER_DATABASE: 'my-spanner-database' # Placeholder, will be overridden by Terraform
+  _IMAGE_NAME: 'consolidator'
+  _REGION: 'europe-west1'
+  _TOPIC_NAME: 'consolidator-trigger-topic'
+  _CONSOLIDATOR_SA_EMAIL: 'consolidator-sa@${_PROJECT_ID}.iam.gserviceaccount.com'
   _PROJECT_SUFFIX: '' # This will be overridden by the trigger
+  _SPANNER_INSTANCE_ID: '' # This will be overridden by the trigger
+  _SPANNER_DATABASE_ID: '' # This will be overridden by the trigger
+  _REDIS_HOST: '' # This will be overridden by the trigger
+  _REDIS_PORT: '' # This will be overridden by the trigger
+  _REDIS_PASSWORD: '' # This will be overridden by the trigger

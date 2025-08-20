@@ -48,3 +48,29 @@ variable "consolidator_sa_roles" {
     "roles/cloudtrace.agent"
   ]
 }
+
+variable "spanner_instance_id" {
+  type        = string
+  description = "The Spanner instance ID."
+}
+
+variable "spanner_database_id" {
+  type        = string
+  description = "The Spanner database ID."
+}
+
+variable "redis_host" {
+  type        = string
+  description = "The Redis host."
+}
+
+variable "redis_port" {
+  type        = string
+  description = "The Redis port."
+}
+
+variable "redis_password" {
+  type        = string
+  description = "The Redis password."
+  sensitive   = true
+}
