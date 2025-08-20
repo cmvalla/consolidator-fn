@@ -2,6 +2,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
   project  = var.project_id
   name     = "consolidator-fn"
   location = var.location
+  deletion_protection = false
 
   template {
     service_account = var.consolidator_sa_email
