@@ -6,217 +6,173 @@ import google.cloud.logging
 import logging
 import redis
 from google.cloud import spanner
+import vertexai
 from vertexai.language_models import TextEmbeddingModel, TextGenerationModel
+import uuid
 
 # --- Boilerplate and Configuration ---
 
 # Setup structured logging
 logging_client = google.cloud.logging.Client()
 logging_client.setup_logging()
+logging.basicConfig(level=logging.INFO)
 
 # --- Environment Variables ---
 GCP_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT")
 SPANNER_INSTANCE_ID = os.environ.get("SPANNER_INSTANCE_ID")
 SPANNER_DATABASE_ID = os.environ.get("SPANNER_DATABASE_ID")
 REDIS_HOST = os.environ.get("REDIS_HOST")
-REDIS_PORT = os.environ.get("REDIS_PORT", 6379)
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
 
 # --- Global Clients ---
-# It's best practice to initialize clients outside of the function body
-# to reuse connections and reduce cold start times.
+spanner_client = None
+redis_client = None
+embedding_model = None
+generation_model = None
+redis_graph = None
+
 try:
+    logging.info("Initializing global clients...")
     spanner_client = spanner.Client(project=GCP_PROJECT)
     spanner_instance = spanner_client.instance(SPANNER_INSTANCE_ID)
     spanner_database = spanner_instance.database(SPANNER_DATABASE_ID)
     
-    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
-    redis_graph = redis_client.graph("graphrag_graph") # Working graph in Redis
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, ssl=True, ssl_cert_reqs=None, decode_responses=True)
+    redis_client.ping()
+    redis_graph = redis_client.graph("graphrag_graph")
 
     vertexai.init(project=GCP_PROJECT, location="us-central1")
     embedding_model = TextEmbeddingModel.from_pretrained("textembedding-gecko@003")
     generation_model = TextGenerationModel.from_pretrained("text-bison@001")
-
+    logging.info("All global clients initialized successfully.")
 except Exception as e:
-    logging.error(f"Failed to initialize global clients: {e}")
-    # Handle initialization failure, maybe by exiting or setting a flag
-    # For a Cloud Function, a failure here might prevent it from starting correctly
-    spanner_client = None
-    redis_client = None
-    embedding_model = None
-    generation_model = None
+    logging.critical(f"FATAL: Failed to initialize one or more global clients: {e}", exc_info=True)
 
 
 @functions_framework.cloud_event
 def consolidator(cloud_event):
     """
-    This function is triggered by a Pub/Sub message via Eventarc.
-    It performs the consolidation logic using RedisGraph and Spanner.
-    
-    Expected Pub/Sub message payload:
-    {
-        "entities": [{"id": "node1", "type": "person", "properties": {"name": "Alice"}}],
-        "relationships": [{"source": "node1", "target": "node2", "type": "knows"}]
-    }
+    Triggered by a Pub/Sub message indicating a batch is ready for consolidation.
+    Fetches partial results from Redis, consolidates them, runs graph analytics,
+    generates summaries, and persists the final graph to Spanner.
     """
-    if not all([spanner_client, redis_client, embedding_model, generation_model]):
+    if not all([spanner_client, redis_client, redis_graph, embedding_model, generation_model]):
         logging.critical("Global clients not initialized. Aborting function.")
         return "ERROR: Client initialization failed", 500
 
+    batch_id = None
     try:
-        # 1. Decode the Pub/Sub message
+        # 1. Decode the Pub/Sub trigger message to get the batch_id
         message_data = base64.b64decode(cloud_event.data["message"]["data"]).decode("utf-8")
-        payload = json.loads(message_data)
-        logging.info(f"Received payload with {len(payload.get('entities', []))} entities and {len(payload.get('relationships', []))} relationships.")
+        message_json = json.loads(message_data)
+        batch_id = message_json.get("batch_id")
 
-        # 2. Load data into RedisGraph using parameterized UNWIND queries
-        # This is much more efficient and safer than sending one query per element.
+        if not batch_id:
+            logging.error("Pub/Sub message is missing 'batch_id'.")
+            return "Bad Request: Missing batch_id", 400
+
+        logging.info(f"Starting consolidation for batch_id: {batch_id}")
+
+        # 2. Fetch all partial results from Redis
+        results_key = f"batch:{batch_id}:results"
+        
+        # Llen gets the length, lrange gets all elements.
+        num_results = redis_client.llen(results_key)
+        if num_results == 0:
+            logging.warning(f"No results found in Redis for batch '{batch_id}'. Aborting.")
+            return "OK", 200
+            
+        partial_results_str = redis_client.lrange(results_key, 0, -1)
+        logging.info(f"Fetched {len(partial_results_str)} partial results from Redis for batch '{batch_id}'.")
+
+        # 3. Aggregate partial results into a single payload
+        all_entities = {}
+        all_relationships = []
+        for res_str in partial_results_str:
+            res_json = json.loads(res_str)
+            for entity in res_json.get("entities", []):
+                all_entities[entity["id"]] = entity # Use a dict to auto-deduplicate entities
+            all_relationships.extend(res_json.get("relationships", []))
+        
+        payload = {
+            "entities": list(all_entities.values()),
+            "relationships": all_relationships
+        }
+        logging.info(f"Aggregated into {len(payload['entities'])} unique entities and {len(payload['relationships'])} relationships.")
+
+        # 4. Load data into RedisGraph
         try:
             redis_graph.delete()
             logging.info("Cleared existing graph data from 'graphrag_graph'.")
         except redis.exceptions.ResponseError as e:
-            # Graph might not exist on first run, which is okay.
-            if "Graph not found" in str(e):
-                pass 
-            else:
-                raise e
+            if "Graph not found" not in str(e):
+                raise
 
         entities = payload.get("entities", [])
         if entities:
-            # Create all nodes in a single, parameterized query
-            node_query = """
-            UNWIND $nodes AS node
-            CREATE (n:Entity {id: node.id, type: node.type, properties: apoc.convert.toJson(node.properties)})
-            """
-            # Note: The properties are stored as a JSON string.
-            # RedisGraph itself doesn't have a native JSON type, so this is a common pattern.
-            # We might need to install the 'apoc' library in RedisGraph for this to work.
-            # A simpler alternative is to flatten properties into top-level attributes.
+            node_query = "UNWIND $nodes AS node CREATE (:Entity {id: node.id, type: node.type, properties: apoc.convert.toJson(node.properties)})"
             redis_graph.query(node_query, {'nodes': entities})
             logging.info(f"Successfully created {len(entities)} nodes in RedisGraph.")
 
         relationships = payload.get("relationships", [])
         if relationships:
-            # Create all relationships in a single, parameterized query
-            rel_query = """
-            UNWIND $rels AS rel
-            MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target})
-            CREATE (a)-[r:RELATIONSHIP {type: rel.type, properties: apoc.convert.toJson(rel.properties)}]->(b)
-            """
+            rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[:RELATIONSHIP {type: rel.type, properties: apoc.convert.toJson(rel.properties)}]->(b)"
             redis_graph.query(rel_query, {'rels': relationships})
-            logging.info(f"Successfully created {len(relationships)} relationships in RedisGraph.")
+            logging.info(f"Successfully created {len(relationships)} relationships.")
 
-        # 3. Execute community detection in RedisGraph
-        # This uses the GDS library (part of redislabs/redisgraph image)
-        # to find communities and write the community ID back to each node.
+        # 5. Execute community detection
         logging.info("Executing Louvain community detection...")
-        community_query = """
-        CALL gds.louvain.write({
-            nodeProjection: 'Entity',
-            relationshipProjection: 'RELATIONSHIP',
-            writeProperty: 'community_id'
-        })
-        YIELD communityCount, modularity
-        """
-        try:
-            result = redis_graph.query(community_query)
-            community_count = result.result_set[0][0]
-            modularity = result.result_set[0][1]
-            logging.info(f"Community detection completed. Found {community_count} communities with modularity {modularity:.4f}.")
-        except redis.exceptions.ResponseError as e:
-            logging.error(f"Error executing community detection: {e}. Ensure the GDS plugin is loaded.")
-            # Handle the error, maybe the graph is too small or has no relationships
-            raise e
+        community_query = "CALL gds.louvain.write({nodeProjection: 'Entity', relationshipProjection: 'RELATIONSHIP', writeProperty: 'community_id'}) YIELD communityCount, modularity"
+        result = redis_graph.query(community_query)
+        community_count, modularity = result.result_set[0]
+        logging.info(f"Community detection found {community_count} communities with modularity {modularity:.4f}.")
 
-
-        # 4. For each community, generate a summary and an embedding
-        logging.info("Generating summaries and embeddings for each community...")
-        
-        # First, get all nodes and their community IDs from the graph
-        get_communities_query = """
-        MATCH (n:Entity) 
-        WHERE n.community_id IS NOT NULL
-        RETURN n.community_id AS communityId, COLLECT({id: n.id, properties: n.properties}) AS nodes
-        """
+        # 6. Generate summaries and embeddings for each community
+        logging.info("Generating summaries and embeddings...")
+        get_communities_query = "MATCH (n:Entity) WHERE n.community_id IS NOT NULL RETURN n.community_id AS communityId, COLLECT({id: n.id, properties: n.properties}) AS nodes"
         community_results = redis_graph.query(get_communities_query)
         
         communities_to_persist = []
         for record in community_results.result_set:
-            community_id = record[0]
-            nodes_in_community = record[1]
-
-            # Create a single text block describing the community
-            # In a real-world scenario, you would be more selective about the properties.
-            community_text = " ".join([str(node) for node in nodes_in_community])
-
-            # Generate a summary with the text model
+            community_id, nodes = record[0], record[1]
+            community_text = " ".join([str(node) for node in nodes])
             summary_prompt = f"Summarize the following collection of related entities in one sentence:\n{community_text}"
-            summary_response = generation_model.predict(summary_prompt, max_output_tokens=128)
-            summary = summary_response.text
-
-            # Generate an embedding for the summary
-            embedding_response = embedding_model.get_embeddings([summary])
-            embedding = embedding_response[0].values
-
+            summary = generation_model.predict(summary_prompt, max_output_tokens=128).text
+            embedding = embedding_model.get_embeddings([summary])[0].values
             communities_to_persist.append({
-                "community_id": str(community_id),
-                "summary": summary,
-                "summary_embedding": embedding,
-                "properties": json.dumps({"node_count": len(nodes_in_community)})
+                "community_id": str(community_id), "summary": summary, "summary_embedding": embedding,
+                "properties": json.dumps({"node_count": len(nodes)})
             })
+        logging.info(f"Generated summaries for {len(communities_to_persist)} communities.")
 
-        logging.info(f"Successfully generated summaries and embeddings for {len(communities_to_persist)} communities.")
-
-
-        # 5. Read the enriched graph from RedisGraph to prepare for Spanner insertion
-        logging.info("Reading enriched graph from RedisGraph...")
-        
-        # Get all nodes with their new community_id
+        # 7. Extract full graph data for Spanner
         get_nodes_query = "MATCH (n:Entity) RETURN n.id, n.type, n.properties, n.community_id"
-        node_results = redis_graph.query(get_nodes_query)
-        entities_to_persist = [
-            (record[0], record[1], record[2], str(record[3])) for record in node_results.result_set
-        ]
+        entities_to_persist = [(r[0], r[1], r[2], str(r[3])) for r in redis_graph.query(get_nodes_query).result_set]
+        
+        get_rels_query = "MATCH (a:Entity)-[r:RELATIONSHIP]->(b:Entity) RETURN a.id, b.id, r.type, r.properties"
+        relationships_to_persist = [(str(uuid.uuid4()), r[0], r[1], r[2], r[3]) for r in redis_graph.query(get_rels_query).result_set]
+        logging.info(f"Extracted {len(entities_to_persist)} entities and {len(relationships_to_persist)} relationships for Spanner.")
 
-        # Get all relationships
-        get_rels_query = "MATCH (a:Entity)-[r:RELATIONSHIP]->(b:Entity) RETURN r.id, a.id, b.id, r.type, r.properties"
-        rel_results = redis_graph.query(get_rels_query)
-        relationships_to_persist = [
-            (record[0] or str(uuid.uuid4()), record[1], record[2], record[3], record[4]) for record in rel_results.result_set
-        ]
-        logging.info(f"Extracted {len(entities_to_persist)} entities and {len(relationships_to_persist)} relationships to persist.")
-
-
-        # 6. Write the final graph to Spanner (our System of Record)
+        # 8. Write to Spanner
         def insert_data(transaction):
             if communities_to_persist:
-                transaction.insert(
-                    "Communities",
-                    columns=("community_id", "summary", "summary_embedding", "properties"),
-                    values=[(c["community_id"], c["summary"], c["summary_embedding"], c["properties"]) for c in communities_to_persist]
-                )
+                transaction.insert("Communities", columns=("community_id", "summary", "summary_embedding", "properties"),
+                                   values=[(c["community_id"], c["summary"], c["summary_embedding"], c["properties"]) for c in communities_to_persist])
             if entities_to_persist:
-                transaction.insert(
-                    "Entities",
-                    columns=("entity_id", "type", "properties", "community_id"),
-                    values=entities_to_persist
-                )
+                transaction.insert("Entities", columns=("entity_id", "type", "properties", "community_id"), values=entities_to_persist)
             if relationships_to_persist:
-                transaction.insert(
-                    "Relationships",
-                    columns=("relationship_id", "source_entity_id", "target_entity_id", "type", "properties"),
-                    values=relationships_to_persist
-                )
-            logging.info(f"Persisted {len(communities_to_persist)} communities, {len(entities_to_persist)} entities, and {len(relationships_to_persist)} relationships to Spanner.")
-
+                transaction.insert("Relationships", columns=("relationship_id", "source_entity_id", "target_entity_id", "type", "properties"), values=relationships_to_persist)
+        
         spanner_database.run_in_transaction(insert_data)
         logging.info("Successfully persisted all data to Spanner.")
 
+        # 9. Clean up Redis keys for the completed batch
+        redis_client.delete(f"batch:{batch_id}:results", f"batch:{batch_id}:counter")
+        logging.info(f"Cleaned up Redis keys for batch_id: {batch_id}")
 
         return "OK", 200
 
     except Exception as e:
-        logging.error(f"An error occurred in the consolidator function: {e}", exc_info=True)
-        # Depending on the error, you might want to retry the function
-        # For now, we return a generic error
+        logging.error(f"An error occurred in the consolidator for batch '{batch_id}': {e}", exc_info=True)
         return "Internal Server Error", 500
