@@ -42,6 +42,18 @@ steps:
     terraform apply -auto-approve -var="image_tag=$BUILD_ID"
   waitFor: ['push']
 
+# Clean up old images
+- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
+  id: cleanup-images
+  entrypoint: 'bash'
+  args:
+  - './cleanup_images.sh'
+  - '${_LOCATION}'
+  - '${_PROJECT_ID}'
+  - '${_REPOSITORY_ID}'
+  - '${_IMAGE_NAME}'
+  waitFor: ['terraform-deploy']
+
 images:
 - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID'
 - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest'
