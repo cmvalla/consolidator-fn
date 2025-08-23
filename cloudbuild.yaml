@@ -47,7 +47,7 @@ steps:
   id: cleanup-images
   entrypoint: 'bash'
   args:
-  - './cleanup_images.sh'
+  - 'cleanup_images.sh'
   - '${_LOCATION}'
   - '${_PROJECT_ID}'
   - '${_REPOSITORY_ID}'
