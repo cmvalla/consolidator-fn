@@ -63,7 +63,7 @@ resource "google_eventarc_trigger" "consolidator_trigger" {
 
   transport {
     pubsub {
-      topic = "projects/${var.project_id}/topics/${var.topic_name}"
+      topic = var.topic_resource_id
     }
   }
 
