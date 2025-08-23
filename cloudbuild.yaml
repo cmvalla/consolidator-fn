@@ -1,6 +1,6 @@
 steps:
 # Download the terraform.tfvars from Secret Manager
-- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: download-tfvars
   entrypoint: 'bash'
   args:
@@ -9,7 +9,7 @@ steps:
     gcloud secrets versions access latest --secret="consolidator-tfvars" --project="${_PROJECT_ID}" > terraform/terraform.tfvars
 
 # Build and tag the Docker image
-- name: 'gcr.io/cloud-builders/docker'
+- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: build
   args: [
     'build',
@@ -24,13 +24,13 @@ steps:
   waitFor: ['download-tfvars']
 
 # Push the images
-- name: 'gcr.io/cloud-builders/docker'
+- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: push
   args: ['push', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}', '--all-tags']
   waitFor: ['build']
 
 # Run Terraform to deploy the function and its resources
-- name: 'hashicorp/terraform:1.0.0'
+- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: terraform-deploy
   entrypoint: 'sh'
   args:
