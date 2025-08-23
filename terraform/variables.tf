@@ -49,16 +49,6 @@ variable "consolidator_sa_roles" {
   ]
 }
 
-variable "spanner_instance_id" {
-  type        = string
-  description = "The Spanner instance ID."
-}
-
-variable "spanner_database_id" {
-  type        = string
-  description = "The Spanner database ID."
-}
-
 variable "redis_host" {
   type        = string
   description = "The Redis host."
@@ -73,4 +63,16 @@ variable "redis_password" {
   type        = string
   description = "The Redis password."
   sensitive   = true
+}
+
+variable "memgraph_host" {
+  type        = string
+  description = "The Memgraph host."
+  default     = "memgraph-service.memgraph.svc.cluster.local"
+}
+
+variable "memgraph_port" {
+  type        = string
+  description = "The Memgraph port."
+  default     = "7687"
 }

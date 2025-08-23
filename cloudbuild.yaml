@@ -1,4 +1,13 @@
 steps:
+# Download the terraform.tfvars from Secret Manager
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  id: download-tfvars
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    gcloud secrets versions access latest --secret="consolidator-tfvars" --project="${_PROJECT_ID}" > terraform/terraform.tfvars
+
 # Build and tag the Docker image
 - name: 'gcr.io/cloud-builders/docker'
   id: build
@@ -12,6 +21,7 @@ steps:
     '-f', 'Dockerfile',
     '.'
   ]
+  waitFor: ['download-tfvars']
 
 # Push the images
 - name: 'gcr.io/cloud-builders/docker'
@@ -28,20 +38,7 @@ steps:
   - |
     cd terraform
     terraform init -backend-config="prefix=cloud-spanner-demo/${_PROJECT_SUFFIX}/consolidator"
-    terraform apply -auto-approve \
-      -var="project_id=${_PROJECT_ID}" \
-      -var="region=${_REGION}" \
-      -var="location=${_LOCATION}" \
-      -var="repository_id=${_REPOSITORY_ID}" \
-      -var="image_name=${_IMAGE_NAME}" \
-      -var="image_tag=$BUILD_ID" \
-      -var="topic_name=${_TOPIC_NAME}" \
-      -var="consolidator_sa_email=${_CONSOLIDATOR_SA_EMAIL}" \
-      -var="spanner_instance_id=${_SPANNER_INSTANCE_ID}" \
-      -var="spanner_database_id=${_SPANNER_DATABASE_ID}" \
-      -var="redis_host=${_REDIS_HOST}" \
-      -var="redis_port=${_REDIS_PORT}" \
-      -var="redis_password=${_REDIS_PASSWORD}"
+    terraform apply -auto-approve -var="image_tag=$BUILD_ID"
   waitFor: ['push']
 
 images:
@@ -53,12 +50,4 @@ substitutions:
   _LOCATION: 'europe-west1'
   _REPOSITORY_ID: 'my-docker-repo'
   _IMAGE_NAME: 'consolidator'
-  _REGION: 'europe-west1'
-  _TOPIC_NAME: 'consolidator-trigger-topic'
-  _CONSOLIDATOR_SA_EMAIL: 'consolidator-sa@${_PROJECT_ID}.iam.gserviceaccount.com'
   _PROJECT_SUFFIX: '' # This will be overridden by the trigger
-  _SPANNER_INSTANCE_ID: '' # This will be overridden by the trigger
-  _SPANNER_DATABASE_ID: '' # This will be overridden by the trigger
-  _REDIS_HOST: '' # This will be overridden by the trigger
-  _REDIS_PORT: '' # This will be overridden by the trigger
-  _REDIS_PASSWORD: '' # This will be overridden by the trigger

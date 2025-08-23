@@ -4,3 +4,4 @@ redis
 google-cloud-spanner
 google-cloud-aiplatform
 google-cloud-pubsub>=2.13.0
+pymemgpt

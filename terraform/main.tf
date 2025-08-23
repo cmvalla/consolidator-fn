@@ -21,14 +21,6 @@ resource "google_cloud_run_v2_service" "consolidator" {
           value = var.project_id
         }
         env {
-          name  = "SPANNER_INSTANCE_ID"
-          value = var.spanner_instance_id
-        }
-        env {
-          name  = "SPANNER_DATABASE_ID"
-          value = var.spanner_database_id
-        }
-        env {
           name  = "REDIS_HOST"
           value = var.redis_host
         }
@@ -39,6 +31,14 @@ resource "google_cloud_run_v2_service" "consolidator" {
         env {
           name  = "REDIS_PASSWORD"
           value = var.redis_password
+        }
+        env {
+          name  = "MEMGRAPH_HOST"
+          value = var.memgraph_host
+        }
+        env {
+          name  = "MEMGRAPH_PORT"
+          value = var.memgraph_port
         }
       }
   }
