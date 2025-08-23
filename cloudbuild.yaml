@@ -12,6 +12,7 @@ steps:
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: build
   args: [
+    'docker',
     'build',
     '--build-arg', 'BASE_IMAGE_LOCATION=${_LOCATION}',
     '--build-arg', 'PROJECT_ID=${_PROJECT_ID}',
@@ -26,7 +27,7 @@ steps:
 # Push the images
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: push
-  args: ['push', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}', '--all-tags']
+  args: ['docker', 'push', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}', '--all-tags']
   waitFor: ['build']
 
 # Run Terraform to deploy the function and its resources
