@@ -49,6 +49,14 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "MEMGRAPH_PORT"
           value = var.memgraph_port
         }
+        env {
+          name  = "MEMGRAPH_USER"
+          value = var.memgraph_user
+        }
+        env {
+          name  = "MEMGRAPH_PASSWORD"
+          value = var.memgraph_password
+        }
       }
   }
 }
