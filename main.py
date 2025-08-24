@@ -12,6 +12,8 @@ from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence, RunnablePassthrough
 import google.cloud.secretmanager as secretmanager
 
+import google.cloud.spanner_v1 as spanner
+
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
 logging_client.setup_logging()
@@ -26,11 +28,16 @@ MEMGRAPH_HOST = os.environ.get("MEMGRAPH_HOST", "memgraph-service.memgraph.svc.c
 MEMGRAPH_PORT = int(os.environ.get("MEMGRAPH_PORT", 7687))
 MEMGRAPH_USER = os.environ.get("MEMGRAPH_USER", "memgraph")
 MEMGRAPH_PASSWORD = os.environ.get("MEMGRAPH_PASSWORD")
+SPANNER_INSTANCE_ID = os.environ.get("SPANNER_INSTANCE_ID")
+SPANNER_DATABASE_ID = os.environ.get("SPANNER_DATABASE_ID")
 
 # --- Global Clients ---
 redis_client = None
 llm = None
 memgraph_graph = None
+spanner_client = None
+spanner_instance = None
+spanner_database = None
 
 try:
     logging.info("Initializing global clients...")
@@ -43,12 +50,18 @@ try:
     logging.info("Initializing Memgraph client...")
     os.environ["NEO4J_USERNAME"] = MEMGRAPH_USER
     os.environ["NEO4J_PASSWORD"] = MEMGRAPH_PASSWORD
-    memgraph_graph = MemgraphGraph(url=f"bolt://{MEMGRAPH_HOST}:{MEMGRAPH_PORT}", username=MEMGRAPH_USER, password=MEMGRAPH_PASSWORD)
+    memgraph_graph = MemgraphGraph(url=f"bolt://{MEMGRAPH_HOST}:{MEMGRAPH_PORT}")
     logging.info("Memgraph client initialized successfully.")
 
     logging.info("Initializing Vertex AI...")
     llm = VertexAI(model_name="text-bison@001")
     logging.info("Vertex AI clients initialized successfully.")
+
+    logging.info("Initializing Spanner client...")
+    spanner_client = spanner.Client()
+    spanner_instance = spanner_client.instance(SPANNER_INSTANCE_ID)
+    spanner_database = spanner_instance.database(SPANNER_DATABASE_ID)
+    logging.info("Spanner client initialized successfully.")
 
     logging.info("All global clients initialized successfully.")
 except Exception as e:
@@ -127,6 +140,63 @@ def cleanup_redis(data):
     redis_client.delete(f"batch:{batch_id}:results", f"batch:{batch_id}:counter")
     return data
 
+def migrate_to_spanner(data):
+    logging.info("Migrating data to Spanner...")
+
+    # Extract data from Memgraph
+    entities_memgraph = memgraph_graph.query("MATCH (e:Entity) RETURN e.id AS EntityId, e.type AS Type, e.properties AS Properties")
+    relationships_memgraph = memgraph_graph.query("MATCH (s)-[r]->(t) RETURN s.id AS SourceEntityId, t.id AS TargetEntityId, r.type AS Type, r.properties AS Properties")
+    communities_memgraph = memgraph_graph.query("MATCH (c:Community) RETURN c.id AS CommunityId, c.summary AS Summary, c.embedding AS Embedding")
+    entity_community_memgraph = memgraph_graph.query("MATCH (e:Entity)-[:BELONGS_TO]->(c:Community) RETURN e.id AS EntityId, c.id AS CommunityId")
+
+    # Prepare data for Spanner
+    entities_to_insert = []
+    for entity in entities_memgraph:
+        entities_to_insert.append((entity["EntityId"], entity["Type"], json.dumps(entity["Properties"])))
+
+    relationships_to_insert = []
+    for rel in relationships_memgraph:
+        relationships_to_insert.append((rel["SourceEntityId"], rel["TargetEntityId"], rel["Type"], json.dumps(rel["Properties"])))
+
+    communities_to_insert = []
+    for community in communities_memgraph:
+        communities_to_insert.append((community["CommunityId"], community["Summary"], community["Embedding"])) # Assuming Embedding is already a list of floats
+
+    entity_community_to_insert = []
+    for ec in entity_community_memgraph:
+        entity_community_to_insert.append((ec["EntityId"], ec["CommunityId"])) # Assuming Embedding is already a list of floats
+
+    # Load data into Spanner
+    def insert_data(transaction):
+        if entities_to_insert:
+            transaction.insert(
+                table="Entities",
+                columns=("EntityId", "Type", "Properties"),
+                values=entities_to_insert,
+            )
+        if relationships_to_insert:
+            transaction.insert(
+                table="Relationships",
+                columns=("SourceEntityId", "TargetEntityId", "Type", "Properties"),
+                values=relationships_to_insert,
+            )
+        if communities_to_insert:
+            transaction.insert(
+                table="Communities",
+                columns=("CommunityId", "Summary", "Embedding"),
+                values=communities_to_insert,
+            )
+        if entity_community_to_insert:
+            transaction.insert(
+                table="EntityCommunity",
+                columns=("EntityId", "CommunityId"),
+                values=entity_community_to_insert,
+            )
+
+    spanner_database.run_in_transaction(insert_data)
+    logging.info("Data migrated to Spanner successfully.")
+    return data
+
 # --- LangChain Sequence ---
 consolidation_chain = RunnableSequence(
     decode_pubsub_message,
@@ -136,6 +206,7 @@ consolidation_chain = RunnableSequence(
     run_community_detection,
     generate_summaries,
     store_summaries,
+    migrate_to_spanner,
     cleanup_redis
 )
 
