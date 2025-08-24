@@ -39,7 +39,7 @@ try:
     logging.info("Redis client initialized successfully.")
 
     logging.info("Initializing Memgraph client...")
-    memgraph_graph = MemgraphGraph(host=MEMGRAPH_HOST, port=MEMGRAPH_PORT)
+    memgraph_graph = MemgraphGraph(url=f"bolt://{MEMGRAPH_HOST}:{MEMGRAPH_PORT}")
     logging.info("Memgraph client initialized successfully.")
 
     logging.info("Initializing Vertex AI...")
