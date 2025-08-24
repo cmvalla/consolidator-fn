@@ -9,10 +9,12 @@ resource "google_cloud_run_v2_service" "consolidator" {
     timeout         = "1800s" # 30 minutes for potentially long-running consolidations
     scaling {
       min_instance_count = 0 # Can scale to zero
-      max_instance_count = 3
+      max_instance_count = 5
     }
+    max_instance_request_concurrency = 50
     containers {
         image = "${var.location}-docker.pkg.dev/${var.project_id}/${var.repository_id}/${var.image_name}:${var.image_tag}"
+       
         ports {
           container_port = 8080
         }
