@@ -57,6 +57,14 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "MEMGRAPH_PASSWORD"
           value = var.memgraph_password
         }
+        env {
+          name  = "NEO4J_USERNAME"
+          value = var.memgraph_user
+        }
+        env {
+          name  = "NEO4J_PASSWORD"
+          value = var.memgraph_password
+        }
       }
   }
 }
