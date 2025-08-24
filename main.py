@@ -50,7 +50,7 @@ try:
     logging.info("Initializing Memgraph client...")
     os.environ["NEO4J_USERNAME"] = MEMGRAPH_USER
     os.environ["NEO4J_PASSWORD"] = MEMGRAPH_PASSWORD
-    memgraph_graph = MemgraphGraph(url=f"bolt://{MEMGRAPH_HOST}:{MEMGRAPH_PORT}")
+    memgraph_graph = MemgraphGraph(url=f"bolt://{MEMGRAPH_HOST}:{MEMGRAPH_PORT}", username=MEMGRAPH_USER, password=MEMGRAPH_PASSWORD)
     logging.info("Memgraph client initialized successfully.")
 
     logging.info("Initializing Vertex AI...")
