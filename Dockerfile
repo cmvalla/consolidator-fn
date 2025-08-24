@@ -2,8 +2,8 @@ ARG BASE_IMAGE_LOCATION
 ARG PROJECT_ID
 ARG REPOSITORY_ID
 # Use the base
-#FROM ${BASE_IMAGE_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY_ID}/base-image:latest
-FROM python:3.11-slim
+FROM ${BASE_IMAGE_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY_ID}/base-image:latest
+#FROM python:3.11-slim
 # Set the working directory.
 WORKDIR /app
 
