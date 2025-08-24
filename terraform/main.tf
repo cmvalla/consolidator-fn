@@ -13,7 +13,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
     }
     max_instance_request_concurrency = 50
     containers {
-        image = "${var.location}-docker.pkg.dev/${var.project_id}/${var.repository_id}/${var.image_name}:${var.image_tag}"
+        image = "${var.image_url}:${var.image_tag}"
        
         ports {
           container_port = 8080
@@ -65,7 +65,7 @@ resource "google_eventarc_trigger" "consolidator_trigger" {
 
   transport {
     pubsub {
-      topic = var.topic_resource_id
+      topic = "projects/${var.project_id}/topics/${var.topic_name}"
     }
   }
 
