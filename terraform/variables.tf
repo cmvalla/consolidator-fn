@@ -26,17 +26,6 @@ variable "image_name" {
 variable "image_tag" {
   type        = string
   description = "The tag of the Docker image, typically the Build ID."
-  default = "latest"
-}
-
-variable "image_url" {
-  type        = string
-  description = "The full URL of the Docker image."
-}
-
-variable "topic_name" {
-  type        = string
-  description = "The name of the Pub/Sub topic that triggers the consolidator."
 }
 
 variable "topic_resource_id" {
@@ -79,11 +68,15 @@ variable "redis_password" {
 variable "memgraph_host" {
   type        = string
   description = "The Memgraph host."
-  default     = "memgraph-service.memgraph.svc.cluster.local"
 }
 
 variable "memgraph_port" {
   type        = string
   description = "The Memgraph port."
-  default     = "7687"
+}
+
+variable "memgraph_password" {
+  type        = string
+  description = "The Memgraph password."
+  sensitive   = true
 }
