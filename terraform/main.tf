@@ -12,8 +12,18 @@ resource "google_cloud_run_v2_service" "consolidator" {
       max_instance_count = 5
     }
     max_instance_request_concurrency = 50
+    vpc_access {
+      connector = var.vpc_connector
+      egress = "ALL_TRAFFIC"
+    }
     containers {
         image = "${var.location}-docker.pkg.dev/${var.project_id}/${var.repository_id}/${var.image_name}:${var.image_tag}"
+        resources {
+          limits = {
+            "memory": "1Gi",
+            "cpu": "1"
+          }
+        }
        
         ports {
           container_port = 8080
