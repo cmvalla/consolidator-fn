@@ -59,11 +59,7 @@ variable "redis_port" {
   description = "The Redis port."
 }
 
-variable "redis_password" {
-  type        = string
-  description = "The Redis password."
-  sensitive   = true
-}
+
 
 variable "memgraph_host" {
   type        = string

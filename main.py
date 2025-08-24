@@ -8,7 +8,7 @@ import redis
 import pymemgpt
 import vertexai
 from vertexai.language_models import TextEmbeddingModel, TextGenerationModel
-import uuid
+import google.cloud.secretmanager as secretmanager
 
 # --- Boilerplate and Configuration ---
 
@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 GCP_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT")
 REDIS_HOST = os.environ.get("REDIS_HOST")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
-REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
+REDIS_PASSWORD = secretmanager.SecretManagerServiceClient().access_secret_version(request={"name": f"projects/{GCP_PROJECT}/secrets/redis-password/versions/latest"}).payload.data.decode("UTF-8")
 MEMGRAPH_HOST = os.environ.get("MEMGRAPH_HOST", "memgraph-service.memgraph.svc.cluster.local")
 MEMGRAPH_PORT = int(os.environ.get("MEMGRAPH_PORT", 7687))
 
@@ -35,7 +35,7 @@ memgraph_client = None
 try:
     logging.info("Initializing global clients...")
     
-    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, ssl=True, ssl_cert_reqs=None, decode_responses=True)
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, ssl=False, ssl_cert_reqs=None, decode_responses=True, socket_connect_timeout=10)
     redis_client.ping()
 
     # Initialize Memgraph client
