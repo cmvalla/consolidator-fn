@@ -30,10 +30,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "REDIS_PORT"
           value = var.redis_port
         }
-        env {
-          name  = "REDIS_PASSWORD"
-          value = var.redis_password
-        }
+        
         env {
           name  = "MEMGRAPH_HOST"
           value = var.memgraph_host
