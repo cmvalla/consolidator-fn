@@ -65,9 +65,15 @@ resource "google_eventarc_trigger" "consolidator_trigger" {
 
   transport {
     pubsub {
-      topic = var.topic_resource_id
+      topic = data.google_pubsub_topic.consolidator.id
     }
   }
 
   service_account = var.consolidator_sa_email
+}
+
+
+data "google_pubsub_topic" "consolidator" {
+  name = var.topic_name
+  project  = var.project_id
 }
