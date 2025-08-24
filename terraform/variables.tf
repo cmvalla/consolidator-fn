@@ -28,6 +28,11 @@ variable "image_tag" {
   description = "The tag of the Docker image, typically the Build ID."
 }
 
+variable "image_url" {
+  type        = string
+  description = "The full URL of the Docker image."
+}
+
 variable "topic_resource_id" {
   type        = string
   description = "The resource ID of the Pub/Sub topic that triggers the consolidator."
