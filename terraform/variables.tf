@@ -77,6 +77,11 @@ variable "memgraph_password" {
   sensitive   = true
 }
 
+variable "memgraph_user" {
+  type        = string
+  description = "The Memgraph username."
+}
+
 variable "vpc_connector" {
   type        = string
   description = "The Serverless VPC Access connector name."

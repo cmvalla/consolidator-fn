@@ -24,6 +24,8 @@ REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 REDIS_PASSWORD = secretmanager.SecretManagerServiceClient().access_secret_version(request={"name": f"projects/{GCP_PROJECT}/secrets/redis-password/versions/latest"}).payload.data.decode("UTF-8")
 MEMGRAPH_HOST = os.environ.get("MEMGRAPH_HOST", "memgraph-service.memgraph.svc.cluster.local")
 MEMGRAPH_PORT = int(os.environ.get("MEMGRAPH_PORT", 7687))
+MEMGRAPH_USER = os.environ.get("MEMGRAPH_USER", "memgraph")
+MEMGRAPH_PASSWORD = os.environ.get("MEMGRAPH_PASSWORD")
 
 # --- Global Clients ---
 redis_client = None
