@@ -106,11 +106,11 @@ def load_to_memgraph(data):
     memgraph_graph.query("MATCH (n) DETACH DELETE n")
     entities = data.get("entities", [])
     if entities:
-        node_query = "UNWIND $nodes AS node CREATE (:Entity {id: node.id, type: node.type, properties: apoc.convert.toJson(node.properties)})"
+        node_query = "UNWIND $nodes AS node CREATE (:Entity {id: node.id, type: node.type, properties: node.properties})"
         memgraph_graph.query(node_query, params={'nodes': entities})
     relationships = data.get("relationships", [])
     if relationships:
-        rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[:RELATIONSHIP {type: rel.type, properties: apoc.convert.toJson(rel.properties)}]->(b)"
+        rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[:RELATIONSHIP {type: rel.type, properties: rel.properties}]->(b)"
         memgraph_graph.query(rel_query, params={'rels': relationships})
     return data
 
