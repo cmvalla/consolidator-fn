@@ -169,11 +169,11 @@ def migrate_to_spanner(data):
     # Prepare data for Spanner
     entities_to_insert = []
     for entity in entities_memgraph:
-        entities_to_insert.append((entity["EntityId"], entity["Type"], entity["Properties"]))
+        entities_to_insert.append((entity["EntityId"], entity["Type"], json.dumps(entity["Properties"])))
 
     relationships_to_insert = []
     for rel in relationships_memgraph:
-        relationships_to_insert.append((rel["SourceEntityId"], rel["TargetEntityId"], rel["Type"], rel.get("Properties", {{}})))
+        relationships_to_insert.append((rel["SourceEntityId"], rel["TargetEntityId"], rel["Type"], json.dumps(rel.get("Properties", {}))))
 
     communities_to_insert = []
     for community in communities_memgraph:
