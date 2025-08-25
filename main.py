@@ -19,19 +19,7 @@ logging_client = google.cloud.logging.Client()
 logging_client.setup_logging()
 logging.basicConfig(level=logging.INFO)
 
-# --- Environment Variables ---
-GCP_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT")
-REDIS_HOST = os.environ.get("REDIS_HOST")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
-REDIS_PASSWORD = secretmanager.SecretManagerServiceClient().access_secret_version(request={"name": f"projects/{GCP_PROJECT}/secrets/redis-password/versions/latest"}).payload.data.decode("UTF-8")
-MEMGRAPH_HOST = os.environ.get("MEMGRAPH_HOST", "memgraph-service.memgraph.svc.cluster.local")
-MEMGRAPH_PORT = int(os.environ.get("MEMGRAPH_PORT", 7687))
-MEMGRAPH_USER = os.environ.get("MEMGRAPH_USER", "memgraph")
-MEMGRAPH_PASSWORD = os.environ.get("MEMGRAPH_PASSWORD")
-SPANNER_INSTANCE_ID = os.environ.get("SPANNER_INSTANCE_ID")
-SPANNER_DATABASE_ID = os.environ.get("SPANNER_DATABASE_ID")
-
-# --- Global Clients ---
+# --- Global Clients (initialized within the function) ---
 redis_client = None
 llm = None
 memgraph_graph = None
@@ -39,36 +27,53 @@ spanner_client = None
 spanner_instance = None
 spanner_database = None
 
-try:
-    logging.info("Initializing global clients...")
-    
-    logging.info("Initializing Redis client...")
-    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, ssl=False, ssl_cert_reqs=None, decode_responses=True, socket_connect_timeout=10)
-    redis_client.ping()
-    logging.info("Redis client initialized successfully.")
+def initialize_clients():
+    """Initializes all external clients."""
+    global redis_client, llm, memgraph_graph, spanner_client, spanner_instance, spanner_database
 
-    logging.info("Initializing Memgraph client...")
-    os.environ["NEO4J_USERNAME"] = MEMGRAPH_USER
-    os.environ["NEO4J_PASSWORD"] = MEMGRAPH_PASSWORD
-    logging.info("Initializing Memgraph client...")
-    os.environ["MEMGRAPH_USERNAME"] = MEMGRAPH_USER
-    os.environ["MEMGRAPH_PASSWORD"] = MEMGRAPH_PASSWORD
-    memgraph_graph = MemgraphGraph(url=f"bolt://{MEMGRAPH_HOST}:{MEMGRAPH_PORT}", username=MEMGRAPH_USER, password=MEMGRAPH_PASSWORD)
-    logging.info("Memgraph client initialized successfully.")
+    try:
+        logging.info("Initializing global clients...")
 
-    logging.info("Initializing Vertex AI...")
-    llm = VertexAI(model_name="text-bison@001")
-    logging.info("Vertex AI clients initialized successfully.")
+        # --- Environment Variables ---
+        GCP_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        REDIS_HOST = os.environ.get("REDIS_HOST")
+        REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
+        MEMGRAPH_HOST = os.environ.get("MEMGRAPH_HOST", "memgraph-service.memgraph.svc.cluster.local")
+        MEMGRAPH_PORT = int(os.environ.get("MEMGRAPH_PORT", 7687))
+        MEMGRAPH_USER = os.environ.get("MEMGRAPH_USER", "memgraph")
+        MEMGRAPH_PASSWORD = os.environ.get("MEMGRAPH_PASSWORD")
+        SPANNER_INSTANCE_ID = os.environ.get("SPANNER_INSTANCE_ID")
+        SPANNER_DATABASE_ID = os.environ.get("SPANNER_DATABASE_ID")
+        
+        # --- Secret Manager ---
+        sm_client = secretmanager.SecretManagerServiceClient()
+        REDIS_PASSWORD = sm_client.access_secret_version(request={"name": f"projects/{GCP_PROJECT}/secrets/redis-password/versions/latest"}).payload.data.decode("UTF-8")
 
-    logging.info("Initializing Spanner client...")
-    spanner_client = spanner.Client()
-    spanner_instance = spanner_client.instance(SPANNER_INSTANCE_ID)
-    spanner_database = spanner_instance.database(SPANNER_DATABASE_ID)
-    logging.info("Spanner client initialized successfully.")
+        logging.info("Initializing Redis client...")
+        redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, ssl=False, ssl_cert_reqs=None, decode_responses=True, socket_connect_timeout=10)
+        redis_client.ping()
+        logging.info("Redis client initialized successfully.")
 
-    logging.info("All global clients initialized successfully.")
-except Exception as e:
-    logging.critical(f'FATAL: Failed to initialize one or more global clients: {e}', exc_info=True)
+        logging.info("Initializing Memgraph client...")
+        os.environ["NEO4J_USERNAME"] = MEMGRAPH_USER
+        os.environ["NEO4J_PASSWORD"] = MEMGRAPH_PASSWORD
+        memgraph_graph = MemgraphGraph(url=f"bolt://{MEMGRAPH_HOST}:{MEMGRAPH_PORT}", username=MEMGRAPH_USER, password=MEMGRAPH_PASSWORD)
+        logging.info("Memgraph client initialized successfully.")
+
+        logging.info("Initializing Vertex AI...")
+        llm = VertexAI(model_name="text-bison@001")
+        logging.info("Vertex AI clients initialized successfully.")
+
+        logging.info("Initializing Spanner client...")
+        spanner_client = spanner.Client()
+        spanner_instance = spanner_client.instance(SPANNER_INSTANCE_ID)
+        spanner_database = spanner_instance.database(SPANNER_DATABASE_ID)
+        logging.info("Spanner client initialized successfully.")
+
+        logging.info("All global clients initialized successfully.")
+    except Exception as e:
+        logging.critical(f'FATAL: Failed to initialize one or more global clients: {e}', exc_info=True)
+        raise  # Re-raise the exception to halt execution if initialization fails
 
 # --- LangChain Runnables ---
 
@@ -217,6 +222,7 @@ consolidation_chain = RunnableSequence(
 @functions_framework.cloud_event
 def consolidator(cloud_event):
     try:
+        initialize_clients()  # Initialize clients on each invocation
         consolidation_chain.invoke(cloud_event)
         return "OK", 200
     except Exception as e:
