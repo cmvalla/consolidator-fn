@@ -83,6 +83,10 @@ resource "google_cloud_run_v2_service_iam_binding" "consolidator_invoker" {
   members = [
     "serviceAccount:${var.consolidator_sa_email}"
   ]
+
+  depends_on = [
+    google_cloud_run_v2_service.consolidator
+  ]
 }
 
 resource "google_eventarc_trigger" "consolidator_trigger" {
