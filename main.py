@@ -128,15 +128,39 @@ def load_to_memgraph(data):
     return data
 
 def run_community_detection(data):
-    community_query = "CALL community_detection.get() YIELD node, community_id"
-    result = memgraph_graph.query(community_query)
+    try:
+        # Using a less memory-intensive community detection algorithm
+        community_query = "CALL community_detection.wcc() YIELD node, community_id"
+        result = memgraph_graph.query(community_query)
+        
+        # Fallback to an empty list if the query fails or returns no results
+        if not result:
+            logging.warning("Community detection returned no results.")
+            result = []
+
+    except Exception as e:
+        logging.error(f"Error running community detection: {e}", exc_info=True)
+        # In case of an error, we'll proceed without community data
+        result = []
+
     for record in result:
-        logging.info(f"Community detection record: {record}")
-        logging.info(f"Node in record: {record['node']}")
-        node_id = record["node"].get("id")
-        community_id = record["community_id"]
-        memgraph_graph.query("MERGE (c:Community {id: $community_id})", params={"community_id": community_id})
-        memgraph_graph.query("MATCH (e:Entity {id: $node_id}), (c:Community {id: $community_id}) CREATE (e)-[:BELONGS_TO]->(c)", params={"node_id": node_id, "community_id": community_id})
+        # Ensure record and node are not None
+        if record and 'node' in record and record['node']:
+            node_id = record["node"].get("id")
+            community_id = record.get("community_id")
+
+            # Ensure node_id and community_id are not None before proceeding
+            if node_id is not None and community_id is not None:
+                try:
+                    memgraph_graph.query("MERGE (c:Community {id: $community_id})", params={"community_id": community_id})
+                    memgraph_graph.query("MATCH (e:Entity {id: $node_id}), (c:Community {id: $community_id}) CREATE (e)-[:BELONGS_TO]->(c)", params={"node_id": node_id, "community_id": community_id})
+                except Exception as e:
+                    logging.error(f"Error creating community relationship for node {node_id}: {e}", exc_info=True)
+            else:
+                logging.warning(f"Skipping record due to missing 'node_id' or 'community_id': {record}")
+        else:
+            logging.warning(f"Skipping invalid record in community detection result: {record}")
+            
     return data
 
 def generate_summaries(data):
