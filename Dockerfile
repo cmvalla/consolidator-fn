@@ -2,15 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy pre-installed dependencies from the Cloud Build workspace
-# The trailing slash on `packages/` is important!
-COPY packages/ /usr/local/lib/python3.11/site-packages/
-
-# Copy the application code
+# Copy the application code first
 COPY . .
 
-# Expose the port the function is listening on
+# Copy the pre-installed dependencies from the build workspace into the correct location
+# The trailing slash on packages/ is important to copy the contents.
+COPY packages/ /usr/local/lib/python3.11/site-packages/
+
 EXPOSE 8080
 
-# Set the entrypoint for the function
 CMD ["functions-framework", "--target=consolidator", "--source=main.py"]
