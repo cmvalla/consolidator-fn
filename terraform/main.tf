@@ -69,6 +69,12 @@ resource "google_cloud_run_v2_service" "consolidator" {
   }
 }
 
+resource "google_project_iam_member" "consolidator_sa_user" {
+  project = var.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${var.consolidator_sa_email}"
+}
+
 resource "google_cloud_run_v2_service_iam_binding" "consolidator_invoker" {
   project  = var.project_id
   location = var.location
