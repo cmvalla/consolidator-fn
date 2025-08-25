@@ -1,17 +1,21 @@
+# Use an official Python runtime as a parent image
 FROM python:3.11-slim
 
+# Set the working directory in the container
 WORKDIR /app
 
-# Add the vendored packages directory to Python's path
-ENV PYTHONPATH /app/packages
+# Copy the requirements file first to leverage Docker layer caching
+COPY requirements.txt .
 
-# Copy the application code first
+# Install any needed packages specified in requirements.txt
+# This command runs in a separate layer and will be cached
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application code
 COPY . .
 
-# Copy the pre-installed dependencies from the build workspace
-COPY packages /app/packages
-
+# Expose the port the function is listening on
 EXPOSE 8080
 
-# The entrypoint will now use the Python interpreter with the correct path
-CMD ["python3", "-m", "functions_framework", "--target=consolidator", "--source=main.py"]
+# Define the command to run the application
+CMD ["functions-framework", "--target=consolidator", "--source=main.py"]
