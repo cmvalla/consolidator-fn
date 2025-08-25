@@ -142,7 +142,8 @@ def generate_summaries(data):
     summaries = []
     for record in community_results:
         community_id, nodes = record["communityId"], record["nodes"]
-        community_text = " ".join([str(node) for node in nodes])
+        logging.info(f"Nodes for community {community_id}: {json.dumps(nodes)}")
+        community_text = " ".join([str(node["properties"]) for node in nodes])
         summary_prompt = f'Summarize the following collection of related entities in one sentence:\n{community_text}'
         summary = llm.invoke(summary_prompt)
         summaries.append({"community_id": community_id, "summary": summary})
