@@ -73,6 +73,10 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "SPANNER_DATABASE_ID"
           value = var.spanner_database_id
         }
+        env {
+          name  = "LOCATION"
+          value = var.region
+        }
       }
   }
 }
