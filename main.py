@@ -13,6 +13,7 @@ from langchain_core.runnables import RunnableSequence, RunnablePassthrough
 import google.cloud.secretmanager as secretmanager
 import time
 import google.cloud.spanner_v1 as spanner
+import psutil
 
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
@@ -32,6 +33,12 @@ def initialize_clients():
     global redis_client, llm, memgraph_graph, spanner_client, spanner_instance, spanner_database
 
     try:
+        # Log system resource usage
+        cpu_usage = psutil.cpu_percent(interval=1)
+        memory_info = psutil.virtual_memory()
+        logging.info(f"System CPU Usage: {cpu_usage}%")
+        logging.info(f"System Memory: Total={memory_info.total / 1024**3:.2f}GB, Available={memory_info.available / 1024**3:.2f}GB, Used={memory_info.used / 1024**3:.2f}GB, Percentage={memory_info.percent}%")
+
         logging.info("Initializing global clients...")
 
         # --- Environment Variables ---
