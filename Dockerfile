@@ -2,17 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# First, copy only the requirements file.
-COPY requirements.txt .
+# Copy pre-installed dependencies from the Cloud Build workspace
+# The trailing slash on `packages/` is important!
+COPY packages/ /usr/local/lib/python3.11/site-packages/
 
-# Install the dependencies.
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Now, copy the rest of the application code.
+# Copy the application code
 COPY . .
 
-# Expose the port the function is listening on.
+# Expose the port the function is listening on
 EXPOSE 8080
 
-# Set the entrypoint for the function.
+# Set the entrypoint for the function
 CMD ["functions-framework", "--target=consolidator", "--source=main.py"]
