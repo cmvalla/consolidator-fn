@@ -38,7 +38,7 @@ def initialize_clients():
         memory_info = psutil.virtual_memory()
         logging.info(f"System CPU Usage: {cpu_usage}%")
         logging.info(f"System Memory: Total={memory_info.total / 1024**3:.2f}GB, Available={memory_info.available / 1024**3:.2f}GB, Used={memory_info.used / 1024**3:.2f}GB, Percentage={memory_info.percent}%")
-
+        
         logging.info("Initializing global clients...")
 
         # --- Environment Variables ---
