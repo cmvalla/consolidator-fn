@@ -1,59 +1,45 @@
 steps:
-# Step 1: Pull the latest image to use as a cache source
+# Step 1: Build, Cache, and Push
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: pull-cache
+  id: build-and-push
   entrypoint: bash
-  args: [ '-c', 'docker pull ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest || exit 0' ]
-
-# Step 2: Build the image, using the pulled image as a cache
-- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: build
-  entrypoint: docker
   args:
-  - build
-  - --cache-from
-  - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest'
-  - --tag
-  - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID'
-  - --tag
-  - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest'
-  - '.'
-  waitFor: ['pull-cache']
+  - -c
+  - |
+    # Pull the latest image to use as a cache source (fail gracefully if it doesn't exist)
+    docker pull ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest || true
 
-# Step 3: Push the new image to Artifact Registry
-- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: push
-  entrypoint: docker
-  args: ['push', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest']
-  waitFor: ['build']
+    # Build the new image, using the pulled image as a cache
+    docker build \
+      --cache-from ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest \
+      --tag ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID \
+      --tag ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest \
+      .
+    
+    # Push the newly built image
+    docker push ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest
 
-# Step 4: Download config and deploy
+# Step 2: Deploy and Cleanup
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: deploy
+  id: deploy-and-cleanup
   entrypoint: sh
   args:
   - '-c'
   - |
+    # First, download the secrets needed for deployment
     gcloud secrets versions access latest --secret="consolidator-tfvars" --project="${_PROJECT_ID}" > terraform/terraform.tfvars
+    
+    # Run the Terraform deployment
     cd terraform
     terraform init -backend-config="prefix=cloud-spanner-demo/${_PROJECT_SUFFIX}/consolidator"
     terraform apply -auto-approve -var="image_tag=$BUILD_ID"
-  waitFor: ['push']
-
-# Step 5: Clean up old images
-- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: cleanup-images
-  entrypoint: bash
-  args:
-  - './cleanup_images.sh'
-  - '${_LOCATION}'
-  - '${_PROJECT_ID}'
-  - '${_REPOSITORY_ID}'
-  - '${_IMAGE_NAME}'
-  waitFor: ['deploy']
+    
+    # After successful deployment, run the cleanup script
+    cd .. # Return to the workspace root
+    ./cleanup_images.sh '${_LOCATION}' '${_PROJECT_ID}' '${_REPOSITORY_ID}' '${_IMAGE_NAME}'
+  waitFor: ['build-and-push']
 
 images:
-- '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID'
 - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest'
 
 options:
