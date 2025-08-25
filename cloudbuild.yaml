@@ -22,8 +22,8 @@ steps:
     docker push '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}' --all-tags && \
     # Create a container from the new image to extract the updated cache
     CID=$(docker create ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID) && \
-    docker cp $CID:/root/.cache/pip ./pip_cache_updated && \
-    docker rm $CID && \
+    docker cp $$CID:/root/.cache/pip ./pip_cache_updated && \
+    docker rm $$CID && \
     # Pack and upload the new cache
     tar -czf pip-cache.tar.gz -C ./pip_cache_updated . && \
     gsutil cp pip-cache.tar.gz gs://${_PROJECT_ID}-build-cache/consolidator-pip-cache.tar.gz
