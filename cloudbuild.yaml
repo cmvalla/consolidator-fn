@@ -18,7 +18,7 @@ steps:
   args:
   - '-c'
   - |
-    pip install --cache-dir=./.pip_cache -r requirements.txt
+    pip install --cache-dir=./.pip_cache --break-system-packages -r requirements.txt
   waitFor: ['restore-cache']
 
 # Step 3: Save the updated cache
