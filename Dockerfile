@@ -1,19 +1,17 @@
 FROM python:3.11-slim
 
-# Set the working directory
 WORKDIR /app
 
-# Copy the virtual environment, which contains all dependencies
-COPY venv /app/venv
+# Add the vendored packages directory to Python's path
+ENV PYTHONPATH /app/packages
 
-# Copy the application code
+# Copy the application code first
 COPY . .
 
-# Add the virtual environment's bin to the PATH
-# This ensures that any shell running in the container can find the executables.
-ENV PATH="/app/venv/bin:$PATH"
+# Copy the pre-installed dependencies from the build workspace
+COPY packages /app/packages
 
 EXPOSE 8080
 
-# Run the functions-framework from the virtual environment
-CMD ["functions-framework", "--target=consolidator", "--source=main.py"]
+# The entrypoint will now use the Python interpreter with the correct path
+CMD ["python3", "-m", "functions_framework", "--target=consolidator", "--source=main.py"]
