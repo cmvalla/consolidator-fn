@@ -35,6 +35,7 @@ steps:
     terraform apply -auto-approve -var="image_tag=$BUILD_ID"
     
     # After successful deployment, run the cleanup script
+    cd .. # Return to the workspace root
     cleanup_images.sh '${_LOCATION}' '${_PROJECT_ID}' '${_REPOSITORY_ID}' '${_IMAGE_NAME}'
   waitFor: ['build-and-push']
 
