@@ -65,6 +65,14 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "NEO4J_PASSWORD"
           value = var.memgraph_password
         }
+        env {
+          name  = "SPANNER_INSTANCE_ID"
+          value = var.spanner_instance_id
+        }
+        env {
+          name  = "SPANNER_DATABASE_ID"
+          value = var.spanner_database_id
+        }
       }
   }
 }

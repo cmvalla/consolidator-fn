@@ -105,3 +105,13 @@ variable "topic_name" {
   type        = string
   description = "The name of the Pub/Sub topic."
 }
+
+variable "spanner_instance_id" {
+  type        = string
+  description = "The Spanner instance ID."
+}
+
+variable "spanner_database_id" {
+  type        = string
+  description = "The Spanner database ID."
+}

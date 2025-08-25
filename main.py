@@ -65,7 +65,7 @@ def initialize_clients():
         logging.info("Vertex AI clients initialized successfully.")
 
         logging.info("Initializing Spanner client...")
-        spanner_client = spanner.Client()
+        spanner_client = spanner.Client(project=GCP_PROJECT)
         spanner_instance = spanner_client.instance(SPANNER_INSTANCE_ID)
         spanner_database = spanner_instance.database(SPANNER_DATABASE_ID)
         logging.info("Spanner client initialized successfully.")
