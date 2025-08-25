@@ -174,6 +174,11 @@ def migrate_to_spanner(data):
     for ec in entity_community_memgraph:
         entity_community_to_insert.append((ec["EntityId"], ec["CommunityId"])) # Assuming Embedding is already a list of floats
 
+    # Only run transaction if there is data to insert
+    if not any([entities_to_insert, relationships_to_insert, communities_to_insert, entity_community_to_insert]):
+        logging.info("No new data to migrate to Spanner.")
+        return data
+
     # Load data into Spanner
     def insert_data(transaction):
         if entities_to_insert:
