@@ -1,50 +1,31 @@
 steps:
-# Step 1: Restore cached packages
+# Step 1: Build, Cache, and Push
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: restore-cache
+  id: build-and-cache
   entrypoint: bash
   args:
   - -c
   - |
-    gsutil cp gs://${_PROJECT_ID}-build-cache/consolidator-packages.tar.gz packages.tar.gz || echo "Cache not found."
-    if [ -f packages.tar.gz ]; then
-      mkdir -p ./packages
-      tar -xzf packages.tar.gz -C ./packages
+    # Restore the cached virtual environment
+    gsutil cp gs://${_PROJECT_ID}-build-cache/consolidator-venv.tar.gz venv.tar.gz || echo "Cache not found."
+    if [ -f venv.tar.gz ]; then
+      tar -xzf venv.tar.gz
     fi
 
-# Step 2: Install dependencies into the 'packages' directory
-- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: pip-install
-  entrypoint: bash
-  args:
-  - -c
-  - |
-    pip install --target=./packages --upgrade --break-system-packages -r requirements.txt
-  waitFor: ['restore-cache']
+    # Create or update the virtual environment
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
 
-# Step 3: Save the updated packages to the cache
-- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: save-cache
-  entrypoint: bash
-  args:
-  - -c
-  - |
-    tar -czf packages.tar.gz -C ./packages .
-    gsutil cp packages.tar.gz gs://${_PROJECT_ID}-build-cache/consolidator-packages.tar.gz
-  waitFor: ['pip-install']
+    # Save the updated virtual environment to the cache
+    tar -czf venv.tar.gz venv
+    gsutil cp venv.tar.gz gs://${_PROJECT_ID}-build-cache/consolidator-venv.tar.gz
 
-# Step 4: Build and Push the image (now with pre-installed packages)
-- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: build-and-push
-  entrypoint: bash
-  args:
-  - -c
-  - |
-    docker build --tag '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID' --tag '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest' .
+    # Build and push the image
+    docker build --tag '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID' --tag '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest' . && \
     docker push '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}' --all-tags
-  waitFor: ['save-cache']
 
-# Step 5: Download config and deploy
+# Step 2: Download Config and Deploy
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: deploy
   entrypoint: sh
@@ -55,9 +36,9 @@ steps:
     cd terraform
     terraform init -backend-config="prefix=cloud-spanner-demo/${_PROJECT_SUFFIX}/consolidator"
     terraform apply -auto-approve -var="image_tag=$BUILD_ID"
-  waitFor: ['build-and-push']
+  waitFor: ['build-and-cache']
 
-# Step 6: Clean up old images
+# Step 3: Clean up old images
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: cleanup-images
   entrypoint: bash
