@@ -16,8 +16,8 @@ steps:
       --tag ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest \
       .
     
-    # Push the newly built image
-    docker push ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest
+    # Push all tags for the newly built image
+    docker push ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME} --all-tags
 
 # Step 2: Deploy and Cleanup
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
@@ -35,11 +35,11 @@ steps:
     terraform apply -auto-approve -var="image_tag=$BUILD_ID"
     
     # After successful deployment, run the cleanup script
-    cd .. # Return to the workspace root
-    ./cleanup_images.sh '${_LOCATION}' '${_PROJECT_ID}' '${_REPOSITORY_ID}' '${_IMAGE_NAME}'
+    cleanup_images.sh '${_LOCATION}' '${_PROJECT_ID}' '${_REPOSITORY_ID}' '${_IMAGE_NAME}'
   waitFor: ['build-and-push']
 
 images:
+- '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID'
 - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest'
 
 options:
