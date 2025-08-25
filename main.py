@@ -129,7 +129,7 @@ def run_community_detection(data):
     for record in result:
         logging.info(f"Community detection record: {record}")
         logging.info(f"Node in record: {record['node']}")
-        node_id = record["node"]["properties"]["id"]
+        node_id = record["node"]["id"]
         community_id = record["community_id"]
         memgraph_graph.query("MERGE (c:Community {id: $community_id})", params={"community_id": community_id})
         memgraph_graph.query("MATCH (e:Entity {id: $node_id}), (c:Community {id: $community_id}) CREATE (e)-[:BELONGS_TO]->(c)", params={"node_id": node_id, "community_id": community_id})
