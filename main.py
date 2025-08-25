@@ -12,6 +12,8 @@ from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence, RunnablePassthrough
 import google.cloud.secretmanager as secretmanager
 
+import time
+import time
 import google.cloud.spanner_v1 as spanner
 
 # --- Boilerplate and Configuration ---
