@@ -107,16 +107,15 @@ def aggregate_results(data):
     }
 
 def load_to_memgraph(data):
+    memgraph_graph.query("MATCH (n) DETACH DELETE n")
     entities = data.get("entities", [])
     if entities:
         logging.info(f"Loading {len(entities)} entities to Memgraph.")
-        logging.info(f"Entities to load: {json.dumps(entities)}")
         node_query = "UNWIND $nodes AS node CREATE (:Entity {id: node.id, type: node.type, properties: node.properties})"
         memgraph_graph.query(node_query, params={'nodes': entities})
     relationships = data.get("relationships", [])
     if relationships:
         logging.info(f"Loading {len(relationships)} relationships to Memgraph.")
-        logging.info(f"Relationships to load: {json.dumps(relationships)}")
         rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[:RELATIONSHIP {type: rel.type, properties: rel.properties}]->(b)"
         memgraph_graph.query(rel_query, params={'rels': relationships})
     return data
@@ -178,17 +177,13 @@ def migrate_to_spanner(data):
 
     communities_to_insert = []
     for community in communities_memgraph:
-        communities_to_insert.append((community["CommunityId"], community["Summary"], community["Embedding"])) # Assuming Embedding is already a list of floats
+        communities_to_insert.append((community["CommunityId"], community["Summary"], community["Embedding"]))
 
     entity_community_to_insert = []
     for ec in entity_community_memgraph:
-        entity_community_to_insert.append((ec["EntityId"], ec["CommunityId"])) # Assuming Embedding is already a list of floats
+        entity_community_to_insert.append((ec["EntityId"], ec["CommunityId"]))
 
     logging.info(f"Migrating {len(entities_to_insert)} entities, {len(relationships_to_insert)} relationships, {len(communities_to_insert)} communities, and {len(entity_community_to_insert)} entity-community relationships to Spanner.")
-    logging.info(f"Entities to insert: {json.dumps(entities_to_insert)}")
-    logging.info(f"Relationships to insert: {json.dumps(relationships_to_insert)}")
-    logging.info(f"Communities to insert: {json.dumps(communities_to_insert)}")
-    logging.info(f"Entity-Community to insert: {json.dumps(entity_community_to_insert)}")
 
 
     # Only run transaction if there is data to insert
