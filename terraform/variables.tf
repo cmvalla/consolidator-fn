@@ -82,16 +82,6 @@ variable "memgraph_password" {
   sensitive   = true
 }
 
-variable "spanner_instance" {
-  type        = string
-  description = "The Spanner instance ID."
-}
-
-variable "spanner_database" {
-  type        = string
-  description = "The Spanner database ID."
-}
-
 variable "memgraph_user" {
   type        = string
   description = "The Memgraph username."
