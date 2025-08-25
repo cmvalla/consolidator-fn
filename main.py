@@ -99,8 +99,6 @@ def aggregate_results(data):
         all_relationships.extend(res_json.get("relationships", []))
     
     logging.info(f"Aggregated {len(all_entities)} entities and {len(all_relationships)} relationships.")
-    logging.info(f"Aggregated entities: {json.dumps(list(all_entities.values()))}")
-    logging.info(f"Aggregated relationships: {json.dumps(all_relationships)}")
 
     return {
         "batch_id": data["batch_id"],
@@ -230,17 +228,69 @@ def migrate_to_spanner(data):
     logging.info("Data migrated to Spanner successfully.")
     return data
 
+def log_redis_counts(data):
+    """Logs the number of partial results fetched from Redis."""
+    partial_results_count = len(data.get("partial_results", []))
+    logging.info(f"Fetched {partial_results_count} partial results from Redis.")
+    return data
+
+def log_memgraph_counts(data):
+    """Logs the number of nodes and relationships in Memgraph."""
+    try:
+        node_count_result = memgraph_graph.query("MATCH (n) RETURN count(n) AS count")
+        node_count = node_count_result[0]['count'] if node_count_result else 0
+        
+        rel_count_result = memgraph_graph.query("MATCH ()-[r]->() RETURN count(r) AS count")
+        rel_count = rel_count_result[0]['count'] if rel_count_result else 0
+        
+        logging.info(f"Memgraph contains {node_count} nodes and {rel_count} relationships.")
+    except Exception as e:
+        logging.error(f"Error counting objects in Memgraph: {e}", exc_info=True)
+    return data
+
+def log_spanner_counts(data):
+    """Queries and logs the row counts from Spanner tables."""
+    logging.info("Querying Spanner for row counts...")
+    tables_to_query = ["Entities", "Communities", "Relationships", "EntityCommunity"]
+    
+    try:
+        with spanner_database.snapshot() as snapshot:
+            for table in tables_to_query:
+                try:
+                    results = snapshot.execute_sql(f"SELECT COUNT(*) FROM {table}")
+                    for row in results:
+                        logging.info(f"Spanner table '{table}' contains {row[0]} rows.")
+                except Exception as e:
+                    logging.error(f"Error querying row count for table {table}: {e}")
+    except Exception as e:
+        logging.error(f"Error creating Spanner snapshot: {e}", exc_info=True)
+    return data
+
+def cleanup_memgraph(data):
+    """Deletes all nodes and relationships from Memgraph."""
+    logging.info("Cleaning up Memgraph...")
+    try:
+        memgraph_graph.query("MATCH (n) DETACH DELETE n")
+        logging.info("Memgraph cleaned up successfully.")
+    except Exception as e:
+        logging.error(f"Error cleaning up Memgraph: {e}", exc_info=True)
+    return data
+
 # --- LangChain Sequence ---
 consolidation_chain = RunnableSequence(
     decode_pubsub_message,
     fetch_from_redis,
+    log_redis_counts,
     aggregate_results,
     load_to_memgraph,
+    log_memgraph_counts,
     run_community_detection,
     generate_summaries,
     store_summaries,
     migrate_to_spanner,
-    cleanup_redis
+    log_spanner_counts,
+    cleanup_redis,
+    cleanup_memgraph
 )
 
 # --- Main Function ---
