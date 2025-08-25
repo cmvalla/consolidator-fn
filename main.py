@@ -11,9 +11,6 @@ from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence, RunnablePassthrough
 import google.cloud.secretmanager as secretmanager
-
-import time
-import time
 import time
 import google.cloud.spanner_v1 as spanner
 
@@ -294,6 +291,7 @@ consolidation_chain = RunnableSequence(
 @functions_framework.cloud_event
 def consolidator(cloud_event):
     try:
+        time.sleep(10) # Add a 10-second delay
         initialize_clients()  # Initialize clients on each invocation
         consolidation_chain.invoke(cloud_event)
         return "OK", 200
