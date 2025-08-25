@@ -44,6 +44,7 @@ def initialize_clients():
         MEMGRAPH_PASSWORD = os.environ.get("MEMGRAPH_PASSWORD")
         SPANNER_INSTANCE_ID = os.environ.get("SPANNER_INSTANCE_ID")
         SPANNER_DATABASE_ID = os.environ.get("SPANNER_DATABASE_ID")
+        LOCATION = os.environ.get("LOCATION")
         
         # --- Secret Manager ---
         sm_client = secretmanager.SecretManagerServiceClient()
