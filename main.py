@@ -107,7 +107,6 @@ def aggregate_results(data):
     }
 
 def load_to_memgraph(data):
-    memgraph_graph.query("MATCH (n) DETACH DELETE n")
     entities = data.get("entities", [])
     if entities:
         logging.info(f"Loading {len(entities)} entities to Memgraph.")
@@ -254,8 +253,8 @@ def log_spanner_counts(data):
     tables_to_query = ["Entities", "Communities", "Relationships", "EntityCommunity"]
     
     try:
-        with spanner_database.snapshot() as snapshot:
-            for table in tables_to_query:
+        for table in tables_to_query:
+            with spanner_database.snapshot() as snapshot:
                 try:
                     results = snapshot.execute_sql(f"SELECT COUNT(*) FROM {table}")
                     for row in results:
