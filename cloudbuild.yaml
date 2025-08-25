@@ -27,7 +27,7 @@ steps:
   id: save-cache
   entrypoint: bash
   args:
-  - -c'
+  - -c
   - |
     tar -czf packages.tar.gz -C ./packages .
     gsutil cp packages.tar.gz gs://${_PROJECT_ID}-build-cache/consolidator-packages.tar.gz
