@@ -17,7 +17,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
       egress = "ALL_TRAFFIC"
     }
     containers {
-        image = "${var.location}-docker.pkg.dev/${var.project_id}/${var.repository_id}/${var.image_name}:${var.image_tag}"
+        image = "${var.image_url}:${var.image_tag}"
         resources {
           limits = {
             "memory": "1Gi",
