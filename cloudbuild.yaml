@@ -1,53 +1,52 @@
 steps:
-# Download the terraform.tfvars from Secret Manager
+# Step 1: Initial Setup - Restore Cache and Download tfvars
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: download-tfvars
+  id: initial-setup
   entrypoint: 'bash'
   args:
   - '-c'
-  - |
+  - | 
+    gsutil cp gs://${_PROJECT_ID}-build-cache/consolidator-pip-cache.tar.gz pip-cache.tar.gz || echo "Cache not found, proceeding without it."
     gcloud secrets versions access latest --secret="consolidator-tfvars" --project="${_PROJECT_ID}" > terraform/terraform.tfvars
 
-# Build and tag the Docker image
+# Step 2: Build, Push, and Save Cache
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: build
-  args: [
-    'docker',
-    'build',
-    '--build-arg', 'BASE_IMAGE_LOCATION=${_LOCATION}',
-    '--build-arg', 'PROJECT_ID=${_PROJECT_ID}',
-    '--build-arg', 'REPOSITORY_ID=${_REPOSITORY_ID}',
-    '-t', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID',
-    '-t', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest',
-    '-f', 'Dockerfile',
-    '.'
-  ]
-  waitFor: ['download-tfvars']
+  id: build-push-and-cache
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - | 
+    # Build the image, using the restored cache
+    docker build --tag '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID' --tag '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest' --build-arg 'CACHE_FILE=pip-cache.tar.gz' . && \
+    # Push the new image to Artifact Registry
+    docker push '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}' --all-tags && \
+    # Create a container from the new image to extract the updated cache
+    CID=$(docker create ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID) && \
+    docker cp $CID:/root/.cache/pip ./pip_cache_updated && \
+    docker rm $CID && \
+    # Pack and upload the new cache
+    tar -czf pip-cache.tar.gz -C ./pip_cache_updated . && \
+    gsutil cp pip-cache.tar.gz gs://${_PROJECT_ID}-build-cache/consolidator-pip-cache.tar.gz
+  waitFor: ['initial-setup']
 
-# Push the images
-- name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
-  id: push
-  args: ['docker', 'push', '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}', '--all-tags']
-  waitFor: ['build']
-
-# Run Terraform to deploy the function and its resources
+# Step 3: Deploy with Terraform
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: terraform-deploy
   entrypoint: 'sh'
   args:
   - '-c'
-  - |
+  - | 
     cd terraform
     terraform init -backend-config="prefix=cloud-spanner-demo/${_PROJECT_SUFFIX}/consolidator"
     terraform apply -auto-approve -var="image_tag=$BUILD_ID"
-  waitFor: ['push']
+  waitFor: ['build-push-and-cache']
 
-# Clean up old images
+# Step 4: Clean up old images
 - name: 'gcr.io/${_PROJECT_ID}/my-docker-repo/gcp-terraform-build:latest'
   id: cleanup-images
   entrypoint: 'bash'
   args:
-  - 'cleanup_images.sh'
+  - './cleanup_images.sh'
   - '${_LOCATION}'
   - '${_PROJECT_ID}'
   - '${_REPOSITORY_ID}'
@@ -57,8 +56,10 @@ steps:
 images:
 - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID'
 - '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest'
+
 options:
   logging: CLOUD_LOGGING_ONLY
+
 substitutions:
   _PROJECT_ID: '${PROJECT_ID}'
   _LOCATION: 'europe-west1'
