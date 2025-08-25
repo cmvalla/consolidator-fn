@@ -96,6 +96,11 @@ def aggregate_results(data):
         for entity in res_json.get("entities", []):
             all_entities[entity["id"]] = entity
         all_relationships.extend(res_json.get("relationships", []))
+    
+    logging.info(f"Aggregated {len(all_entities)} entities and {len(all_relationships)} relationships.")
+    logging.info(f"Aggregated entities: {json.dumps(list(all_entities.values()))}")
+    logging.info(f"Aggregated relationships: {json.dumps(all_relationships)}")
+
     return {
         "batch_id": data["batch_id"],
         "entities": list(all_entities.values()),
@@ -106,10 +111,14 @@ def load_to_memgraph(data):
     memgraph_graph.query("MATCH (n) DETACH DELETE n")
     entities = data.get("entities", [])
     if entities:
+        logging.info(f"Loading {len(entities)} entities to Memgraph.")
+        logging.info(f"Entities to load: {json.dumps(entities)}")
         node_query = "UNWIND $nodes AS node CREATE (:Entity {id: node.id, type: node.type, properties: node.properties})"
         memgraph_graph.query(node_query, params={'nodes': entities})
     relationships = data.get("relationships", [])
     if relationships:
+        logging.info(f"Loading {len(relationships)} relationships to Memgraph.")
+        logging.info(f"Relationships to load: {json.dumps(relationships)}")
         rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[:RELATIONSHIP {type: rel.type, properties: rel.properties}]->(b)"
         memgraph_graph.query(rel_query, params={'rels': relationships})
     return data
@@ -118,7 +127,9 @@ def run_community_detection(data):
     community_query = "CALL community_detection.get() YIELD node, community_id"
     result = memgraph_graph.query(community_query)
     for record in result:
-        node_id = record["node"].properties["id"]
+        logging.info(f"Community detection record: {record}")
+        logging.info(f"Node in record: {record['node']}")
+        node_id = record["node"]["properties"]["id"]
         community_id = record["community_id"]
         memgraph_graph.query("MERGE (c:Community {id: $community_id})", params={"community_id": community_id})
         memgraph_graph.query("MATCH (e:Entity {id: $node_id}), (c:Community {id: $community_id}) CREATE (e)-[:BELONGS_TO]->(c)", params={"node_id": node_id, "community_id": community_id})
@@ -173,6 +184,13 @@ def migrate_to_spanner(data):
     entity_community_to_insert = []
     for ec in entity_community_memgraph:
         entity_community_to_insert.append((ec["EntityId"], ec["CommunityId"])) # Assuming Embedding is already a list of floats
+
+    logging.info(f"Migrating {len(entities_to_insert)} entities, {len(relationships_to_insert)} relationships, {len(communities_to_insert)} communities, and {len(entity_community_to_insert)} entity-community relationships to Spanner.")
+    logging.info(f"Entities to insert: {json.dumps(entities_to_insert)}")
+    logging.info(f"Relationships to insert: {json.dumps(relationships_to_insert)}")
+    logging.info(f"Communities to insert: {json.dumps(communities_to_insert)}")
+    logging.info(f"Entity-Community to insert: {json.dumps(entity_community_to_insert)}")
+
 
     # Only run transaction if there is data to insert
     if not any([entities_to_insert, relationships_to_insert, communities_to_insert, entity_community_to_insert]):
