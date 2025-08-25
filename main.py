@@ -61,7 +61,7 @@ def initialize_clients():
         logging.info("Memgraph client initialized successfully.")
 
         logging.info("Initializing Vertex AI...")
-        llm = VertexAI(model_name="text-bison@001")
+        llm = VertexAI(model_name="gemini-2.5-flash", location=LOCATION)
         logging.info("Vertex AI clients initialized successfully.")
 
         logging.info("Initializing Spanner client...")
