@@ -7,18 +7,18 @@ steps:
   - -c
   - |
     # Restore cache
-    gsutil cp gs://${_PROJECT_ID}-build-cache/consolidator-packages.tar.gz packages.tar.gz || echo "Cache not found."
-    if [ -f packages.tar.gz ]; then
-      mkdir -p ./packages
-      tar -xzf packages.tar.gz -C ./packages
+    gsutil cp gs://${_PROJECT_ID}-build-cache/consolidator-pip-cache.tar.gz pip-cache.tar.gz || echo "Cache not found."
+    if [ -f pip-cache.tar.gz ]; then
+      mkdir -p ./.pip_cache
+      tar -xzf pip-cache.tar.gz -C ./.pip_cache
     fi
 
-    # Install/update packages
-    pip install --target=./packages --upgrade --break-system-packages -r requirements.txt
+    # Install/update packages using the cache directory
+    pip install --cache-dir=./.pip_cache --upgrade --break-system-packages -r requirements.txt
 
     # Save updated cache
-    tar -czf packages.tar.gz -C ./packages .
-    gsutil cp packages.tar.gz gs://${_PROJECT_ID}-build-cache/consolidator-packages.tar.gz
+    tar -czf pip-cache.tar.gz -C ./.pip_cache .
+    gsutil cp pip-cache.tar.gz gs://${_PROJECT_ID}-build-cache/consolidator-pip-cache.tar.gz
 
     # Build and push the image
     docker build --tag '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID' --tag '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest' . && \
