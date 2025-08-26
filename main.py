@@ -327,7 +327,6 @@ consolidation_chain = RunnableSequence(
 @functions_framework.cloud_event
 def consolidator(cloud_event):
     try:
-        time.sleep(10) # Add a 10-second delay
         initialize_clients()  # Initialize clients on each invocation
         consolidation_chain.invoke(cloud_event)
         return "OK", 200
