@@ -225,25 +225,25 @@ def migrate_to_spanner(data):
     # Load data into Spanner
     def insert_data(transaction):
         if entities_to_insert:
-            transaction.insert(
+            transaction.insert_or_update(
                 table="Entities",
                 columns=("EntityId", "Type", "Properties"),
                 values=entities_to_insert,
             )
         if relationships_to_insert:
-            transaction.insert(
+            transaction.insert_or_update(
                 table="Relationships",
                 columns=("EntityId", "RelationshipId", "TargetEntityId", "Type", "Properties"),
                 values=relationships_to_insert,
             )
         if communities_to_insert:
-            transaction.insert(
+            transaction.insert_or_update(
                 table="Communities",
                 columns=("CommunityId", "Summary", "Embedding"),
                 values=communities_to_insert,
             )
         if entity_community_to_insert:
-            transaction.insert(
+            transaction.insert_or_update(
                 table="EntityCommunity",
                 columns=("EntityId", "CommunityId"),
                 values=entity_community_to_insert,
@@ -296,15 +296,15 @@ def log_spanner_counts(data):
 #     redis_client.delete(f"batch:{batch_id}:results", f"batch:{batch_id}:counter")
 #     return data
 
-# def cleanup_memgraph(data):
-#     """Deletes all nodes and relationships from Memgraph."""
-#     logging.info("Cleaning up Memgraph...")
-#     try:
-#         memgraph_graph.query("MATCH (n) DETACH DELETE n")
-#         logging.info("Memgraph cleaned up successfully.")
-#     except Exception as e:
-#         logging.error(f"Error cleaning up Memgraph: {e}", exc_info=True)
-#     return data
+def cleanup_memgraph(data):
+    """Deletes all nodes and relationships from Memgraph."""
+    logging.info("Cleaning up Memgraph...")
+    try:
+        memgraph_graph.query("MATCH (n) DETACH DELETE n")
+        logging.info("Memgraph cleaned up successfully.")
+    except Exception as e:
+        logging.error(f"Error cleaning up Memgraph: {e}", exc_info=True)
+    return data
 
 # --- LangChain Sequence ---
 consolidation_chain = RunnableSequence(
@@ -319,8 +319,8 @@ consolidation_chain = RunnableSequence(
     store_summaries,
     migrate_to_spanner,
     log_spanner_counts,
-    # cleanup_redis,
-    # cleanup_memgraph
+    cleanup_redis,
+    cleanup_memgraph
 )
 
 # --- Main Function ---
