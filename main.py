@@ -102,8 +102,15 @@ def aggregate_results(data):
     for res_str in data["partial_results"]:
         res_json = json.loads(res_str)
         for entity in res_json.get("entities", []):
-            if "id" in entity:
-                all_entities[entity["id"]] = entity
+            entity_id = None
+            # Check for 'id' in a case-insensitive manner
+            for key in entity.keys():
+                if key.lower() == "id":
+                    entity_id = entity[key]
+                    break
+            
+            if entity_id: # Check if entity_id was found and is not None/empty
+                all_entities[entity_id] = entity
             else:
                 logging.warning(f"Skipping entity without id: {entity}")
         all_relationships.extend(res_json.get("relationships", []))
@@ -117,7 +124,6 @@ def aggregate_results(data):
     }
 
 def load_to_memgraph(data):
-    memgraph_graph.query("MATCH (n) DETACH DELETE n")
     entities = data.get("entities", [])
     if entities:
         logging.info(f"Loading {len(entities)} entities to Memgraph.")
