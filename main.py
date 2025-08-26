@@ -291,15 +291,20 @@ def log_spanner_counts(data):
         logging.error(f"Error creating Spanner snapshot: {e}", exc_info=True)
     return data
 
-def cleanup_memgraph(data):
-    """Deletes all nodes and relationships from Memgraph."""
-    logging.info("Cleaning up Memgraph...")
-    try:
-        memgraph_graph.query("MATCH (n) DETACH DELETE n")
-        logging.info("Memgraph cleaned up successfully.")
-    except Exception as e:
-        logging.error(f"Error cleaning up Memgraph: {e}", exc_info=True)
-    return data
+# def cleanup_redis(data):
+#     batch_id = data["batch_id"]
+#     redis_client.delete(f"batch:{batch_id}:results", f"batch:{batch_id}:counter")
+#     return data
+
+# def cleanup_memgraph(data):
+#     """Deletes all nodes and relationships from Memgraph."""
+#     logging.info("Cleaning up Memgraph...")
+#     try:
+#         memgraph_graph.query("MATCH (n) DETACH DELETE n")
+#         logging.info("Memgraph cleaned up successfully.")
+#     except Exception as e:
+#         logging.error(f"Error cleaning up Memgraph: {e}", exc_info=True)
+#     return data
 
 # --- LangChain Sequence ---
 consolidation_chain = RunnableSequence(
@@ -314,8 +319,8 @@ consolidation_chain = RunnableSequence(
     store_summaries,
     migrate_to_spanner,
     log_spanner_counts,
-    cleanup_redis,
-    cleanup_memgraph
+    # cleanup_redis,
+    # cleanup_memgraph
 )
 
 # --- Main Function ---
