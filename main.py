@@ -102,7 +102,10 @@ def aggregate_results(data):
     for res_str in data["partial_results"]:
         res_json = json.loads(res_str)
         for entity in res_json.get("entities", []):
-            all_entities[entity["id"]] = entity
+            if "id" in entity:
+                all_entities[entity["id"]] = entity
+            else:
+                logging.warning(f"Skipping entity without id: {entity}")
         all_relationships.extend(res_json.get("relationships", []))
     
     logging.info(f"Aggregated {len(all_entities)} entities and {len(all_relationships)} relationships.")
