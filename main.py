@@ -130,7 +130,7 @@ def load_to_memgraph(data):
 def run_community_detection(data):
     try:
         # Using a less memory-intensive community detection algorithm
-        community_query = "CALL community_detection.wcc() YIELD node, community_id"
+        community_query = "CALL community_detection.get() YIELD node, community_id"
         result = memgraph_graph.query(community_query)
         
         # Fallback to an empty list if the query fails or returns no results
