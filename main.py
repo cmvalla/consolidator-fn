@@ -193,7 +193,7 @@ def migrate_to_spanner(data):
 
     # Extract data from Memgraph
     entities_memgraph = memgraph_graph.query("MATCH (e:Entity) RETURN e.id AS EntityId, e.type AS Type, e.properties AS Properties")
-    relationships_memgraph = memgraph_graph.query("MATCH (s)-[r]->(t) RETURN s.id AS EntityId, id(r) as RelationshipId, t.id AS TargetEntityId, r.type AS Type, r.properties AS Properties")
+    relationships_memgraph = memgraph_graph.query("MATCH (s:Entity)-[r]->(t:Entity) RETURN s.id AS EntityId, id(r) as RelationshipId, t.id AS TargetEntityId, r.type AS Type, r.properties AS Properties")
     communities_memgraph = memgraph_graph.query("MATCH (c:Community) RETURN c.id AS CommunityId, c.summary AS Summary, c.embedding AS Embedding")
     entity_community_memgraph = memgraph_graph.query("MATCH (e:Entity)-[:BELONGS_TO]->(c:Community) RETURN e.id AS EntityId, c.id AS CommunityId")
 
