@@ -193,7 +193,7 @@ def migrate_to_spanner(data):
 
     # Extract data from Memgraph
     entities_memgraph = memgraph_graph.query("MATCH (e:Entity) RETURN e.id AS EntityId, e.type AS Type, e.properties AS Properties")
-    relationships_memgraph = memgraph_graph.query("MATCH (s)-[r]->(t) RETURN s.id AS SourceEntityId, t.id AS TargetEntityId, r.type AS Type, r.properties AS Properties")
+    relationships_memgraph = memgraph_graph.query("MATCH (s)-[r]->(t) RETURN s.id AS EntityId, elementId(r) as RelationshipId, t.id AS TargetEntityId, r.type AS Type, r.properties AS Properties")
     communities_memgraph = memgraph_graph.query("MATCH (c:Community) RETURN c.id AS CommunityId, c.summary AS Summary, c.embedding AS Embedding")
     entity_community_memgraph = memgraph_graph.query("MATCH (e:Entity)-[:BELONGS_TO]->(c:Community) RETURN e.id AS EntityId, c.id AS CommunityId")
 
@@ -204,7 +204,7 @@ def migrate_to_spanner(data):
 
     relationships_to_insert = []
     for rel in relationships_memgraph:
-        relationships_to_insert.append((rel["SourceEntityId"], rel["TargetEntityId"], rel["Type"], json.dumps(rel.get("Properties", {}))))
+        relationships_to_insert.append((rel["EntityId"], str(rel["RelationshipId"]), rel["TargetEntityId"], rel["Type"], json.dumps(rel.get("Properties", {}))))
 
     communities_to_insert = []
     for community in communities_memgraph:
@@ -233,7 +233,7 @@ def migrate_to_spanner(data):
         if relationships_to_insert:
             transaction.insert(
                 table="Relationships",
-                columns=("SourceEntityId", "TargetEntityId", "Type", "Properties"),
+                columns=("EntityId", "RelationshipId", "TargetEntityId", "Type", "Properties"),
                 values=relationships_to_insert,
             )
         if communities_to_insert:
