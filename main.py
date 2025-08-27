@@ -203,53 +203,108 @@ def load_to_memgraph(data):
 
 def run_community_detection(data):
     try:
-        # Using a less memory-intensive community detection algorithm
-        community_query = "CALL community_detection.get() YIELD node, community_id"
+        community_query = "CALL community_detection.leiden() YIELD node, communities"
         result = memgraph_graph.query(community_query)
         
-        # Fallback to an empty list if the query fails or returns no results
         if not result:
             logging.warning("Community detection returned no results.")
             result = []
 
     except Exception as e:
         logging.error(f"Error running community detection: {e}", exc_info=True)
-        # In case of an error, we'll proceed without community data
         result = []
 
     for record in result:
-        # Ensure record and node are not None
         if record and 'node' in record and record['node']:
             node_id = record["node"].get("id")
-            community_id = record.get("community_id")
+            communities = record.get("communities")
 
-            # Ensure node_id and community_id are not None before proceeding
-            if node_id is not None and community_id is not None:
+            if node_id is not None and communities is not None:
                 try:
-                    memgraph_graph.query("MERGE (c:Community {id: $community_id})", params={"community_id": community_id})
-                    memgraph_graph.query("MATCH (e:Entity {id: $node_id}), (c:Community {id: $community_id}) CREATE (e)-[:BELONGS_TO]->(c)", params={"node_id": node_id, "community_id": community_id})
+                    # Store the full hierarchy on the entity node
+                    memgraph_graph.query("MATCH (e:Entity {id: $node_id}) SET e.communities = $communities", 
+                                         params={"node_id": node_id, "communities": communities})
+
+                    # Create relationships to community nodes at each level
+                    for i, community_id in enumerate(communities):
+                        level_community_id = f"level_{i}_community_{community_id}"
+                        memgraph_graph.query("MERGE (c:Community {id: $community_id})", 
+                                             params={"community_id": level_community_id})
+                        memgraph_graph.query("MATCH (e:Entity {id: $node_id}), (c:Community {id: $community_id}) CREATE (e)-[:BELONGS_TO]->(c)", 
+                                             params={"node_id": node_id, "community_id": level_community_id})
+
                 except Exception as e:
                     logging.error(f"Error creating community relationship for node {node_id}: {e}", exc_info=True)
             else:
-                logging.warning(f"Skipping record due to missing 'node_id' or 'community_id': {record}")
+                logging.warning(f"Skipping record due to missing 'node_id' or 'communities': {record}")
         else:
             logging.warning(f"Skipping invalid record in community detection result: {record}")
             
     return data
 
-def generate_summaries(data):
-    get_communities_query = "MATCH (c:Community)<-[:BELONGS_TO]-(e:Entity) RETURN c.id AS communityId, COLLECT({id: e.id, properties: e.properties}) AS nodes"
-    community_results = memgraph_graph.query(get_communities_query)
-    
-    summaries = []
-    for record in community_results:
-        community_id, nodes = record["communityId"], record["nodes"]
-        logging.info(f"Nodes for community {community_id}: {json.dumps(nodes)}")
-        community_text = " ".join([str(node["properties"]) for node in nodes])
+def get_community_hierarchy(memgraph_graph):
+    """
+    Queries Memgraph to reconstruct the community hierarchy.
+    Returns a dictionary representing the hierarchy.
+    """
+    hierarchy = {}
+    result = memgraph_graph.query("MATCH (e:Entity) RETURN e.id AS entity_id, e.communities AS communities")
+    for record in result:
+        entity_id = record["entity_id"]
+        communities = record["communities"]
+        if communities:
+            for i, community_id in enumerate(communities):
+                level = f"level_{i}"
+                if level not in hierarchy:
+                    hierarchy[level] = {}
+                if community_id not in hierarchy[level]:
+                    hierarchy[level][community_id] = {"entities": [], "children": set()}
+                hierarchy[level][community_id]["entities"].append(entity_id)
+                if i > 0:
+                    parent_community_id = communities[i-1]
+                    hierarchy[f"level_{i-1}"][parent_community_id]["children"].add(community_id)
+    return hierarchy
+
+def generate_hierarchical_summaries(data):
+    """
+    Generates summaries for each community in the hierarchy, from the bottom up.
+    """
+    hierarchy = get_community_hierarchy(memgraph_graph)
+    summaries = {} # To store summaries of all communities
+
+    if not hierarchy:
+        data["summaries"] = []
+        return data
+
+    # Generate summaries for leaf communities (deepest level)
+    deepest_level_num = max([int(level.split('_')[1]) for level in hierarchy.keys()])
+    deepest_level = f"level_{deepest_level_num}"
+
+    for community_id, community_data in hierarchy[deepest_level].items():
+        entity_ids = community_data["entities"]
+        # Get entities' properties from Memgraph
+        nodes_props = []
+        for entity_id in entity_ids:
+            props = memgraph_graph.query(f"MATCH (e:Entity {{id: '{entity_id}'}}) RETURN e.properties AS props")
+            if props:
+                nodes_props.append(props[0]['props'])
+
+        community_text = " ".join([str(prop) for prop in nodes_props])
         summary_prompt = f'Summarize the following collection of related entities in one sentence:\n{community_text}'
         summary = llm.invoke(summary_prompt)
-        summaries.append({"community_id": community_id, "summary": summary})
-    data["summaries"] = summaries
+        summaries[f"level_{deepest_level_num}_community_{community_id}"] = summary
+
+    # Generate summaries for upper levels
+    for i in range(deepest_level_num - 1, -1, -1):
+        level = f"level_{i}"
+        for community_id, community_data in hierarchy[level].items():
+            child_summaries = [summaries[f"level_{i+1}_community_{child_id}"] for child_id in community_data["children"]]
+            community_text = " ".join(child_summaries)
+            summary_prompt = f'Summarize the following collection of summaries in one sentence:\n{community_text}'
+            summary = llm.invoke(summary_prompt)
+            summaries[f"level_{i}_community_{community_id}"] = summary
+    
+    data["summaries"] = [{"community_id": key, "summary": value} for key, value in summaries.items()]
     return data
 
 def store_summaries(data):
@@ -390,7 +445,7 @@ consolidation_chain = RunnableSequence(
     load_to_memgraph,
     log_memgraph_counts,
     run_community_detection,
-    generate_summaries,
+    generate_hierarchical_summaries,
     store_summaries,
     migrate_to_spanner,
     log_spanner_counts,
