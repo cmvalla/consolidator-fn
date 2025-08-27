@@ -59,7 +59,7 @@ langsmith==0.4.16
 MarkupSafe==3.0.2
 marshmallow==3.26.1
 multidict==6.6.4
-mypy_extensions==1.1.0
+mypy_extensions==1.1.1
 numexpr==2.11.0
 numpy==2.3.2
 opentelemetry-api==1.36.0
@@ -106,3 +106,6 @@ zipp==3.23.0
 zstandard==0.24.0
 neo4j
 psutil>=5.9.0
+thefuzz
+scikit-learn
+python-Levenshtein

@@ -14,6 +14,9 @@ import google.cloud.secretmanager as secretmanager
 import time
 import google.cloud.spanner_v1 as spanner
 import psutil
+from thefuzz import fuzz
+from sklearn.cluster import AgglomerativeClustering
+import numpy as np
 
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
@@ -122,6 +125,68 @@ def aggregate_results(data):
         "entities": list(all_entities.values()),
         "relationships": all_relationships
     }
+
+def cluster_and_merge_entities(data):
+    """
+    Clusters similar entities based on name similarity and merges them.
+    Updates relationships to point to the new merged entities.
+    """
+    entities = data.get("entities", [])
+    relationships = data.get("relationships", [])
+
+    if not entities:
+        return data
+
+    # Extract entity names and IDs
+    entity_names = [entity.get("properties", {}).get("name", "") for entity in entities]
+    entity_ids = [entity.get("id") for entity in entities]
+
+    # Calculate similarity matrix
+    similarity_matrix = np.zeros((len(entity_names), len(entity_names)))
+    for i in range(len(entity_names)):
+        for j in range(i, len(entity_names)):
+            similarity = fuzz.token_set_ratio(entity_names[i], entity_names[j]) / 100.0
+            similarity_matrix[i, j] = similarity
+            similarity_matrix[j, i] = similarity
+
+    # Perform clustering
+    clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=0.8, affinity='precomputed', linkage='average')
+    clusters = clustering.fit_predict(1 - similarity_matrix)
+
+    # Create merged entities and ID mapping
+    merged_entities = {}
+    entity_id_map = {}
+    for i, cluster_id in enumerate(clusters):
+        if cluster_id not in merged_entities:
+            merged_entities[cluster_id] = {
+                "id": f"merged-{cluster_id}",
+                "type": "MergedEntity",
+                "properties": {"merged_entities": []}
+            }
+        
+        original_entity = entities[i]
+        merged_entities[cluster_id]["properties"]["merged_entities"].append(original_entity)
+        entity_id_map[original_entity["id"]] = merged_entities[cluster_id]["id"]
+
+    # Update relationships
+    updated_relationships = []
+    for rel in relationships:
+        source_id = entity_id_map.get(rel.get("source"))
+        target_id = entity_id_map.get(rel.get("target"))
+        if source_id and target_id:
+            updated_relationships.append({
+                "source": source_id,
+                "target": target_id,
+                "type": rel.get("type"),
+                "properties": rel.get("properties")
+            })
+
+    data["entities"] = list(merged_entities.values())
+    data["relationships"] = updated_relationships
+    
+    logging.info(f"Clustered {len(entities)} entities into {len(merged_entities)} merged entities.")
+
+    return data
 
 def load_to_memgraph(data):
     entities = data.get("entities", [])
@@ -321,6 +386,7 @@ consolidation_chain = RunnableSequence(
     fetch_from_redis,
     log_redis_counts,
     aggregate_results,
+    cluster_and_merge_entities,
     load_to_memgraph,
     log_memgraph_counts,
     run_community_detection,
