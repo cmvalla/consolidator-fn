@@ -222,7 +222,7 @@ def load_to_memgraph(data):
     relationships = data.get("relationships", [])
     if relationships:
         logging.info(f"Loading {len(relationships)} relationships to Memgraph.")
-        rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[:RELATIONSHIP {type: rel.type, properties: rel.properties}]->(b)"
+        rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[:RELATIONSHIP {type: rel.type, properties: rel.properties, weight: 1}]->(b)"
         memgraph_graph.query(rel_query, params={'rels': relationships})
     return data
 
