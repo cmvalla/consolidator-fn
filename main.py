@@ -330,8 +330,9 @@ def generate_hierarchical_summaries(data):
         entity_ids = community_data["entities"]
         
         # Get entities and relationships from Memgraph
-        entities = memgraph_graph.query(f"MATCH (e:Entity) WHERE e.id IN {entity_ids} RETURN e.properties AS props")
-        relationships = memgraph_graph.query(f"MATCH (e1:Entity)-[r:RELATIONSHIP]->(e2:Entity) WHERE e1.id IN {entity_ids} AND e2.id IN {entity_ids} RETURN r.type AS type, r.properties AS props")
+        # Summarize entities and relationships to reduce token count for LLM
+        entities = memgraph_graph.query(f"MATCH (e:Entity) WHERE e.id IN {entity_ids} RETURN e.id AS id, e.type AS type, e.properties.name AS name")
+        relationships = memgraph_graph.query(f"MATCH (e1:Entity)-[r:RELATIONSHIP]->(e2:Entity) WHERE e1.id IN {entity_ids} AND e2.id IN {entity_ids} RETURN e1.id AS source_id, e2.id AS target_id, r.type AS type")
 
         summary_prompt = COMMUNITY_SUMMARY_PROMPT.format(
             community_id=community_id,
