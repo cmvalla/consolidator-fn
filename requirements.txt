@@ -1,7 +1,7 @@
 functions-framework==3.*
 google-cloud-logging==3.12.1
 redis==6.4.0
-langchain-community==0.3.27
+langchain-community==0.3.29
 langchain-google-vertexai==2.0.28
 langchain==0.3.27
 langchain-core==0.3.74
