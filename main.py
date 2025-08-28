@@ -32,6 +32,9 @@ def initialize_clients():
     """Initializes all external clients."""
     global redis_client, llm, memgraph_graph, spanner_client, spanner_instance, spanner_database
 
+    import sys
+    logging.info(f"sys.path: {sys.path}")
+
     try:
         # Log system resource usage
         cpu_usage = psutil.cpu_percent(interval=1)
