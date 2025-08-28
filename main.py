@@ -101,6 +101,7 @@ def aggregate_results(data):
     all_relationships = []
     for res_str in data["partial_results"]:
         res_json = json.loads(res_str)
+        logging.info(f"DEBUG: Processing res_json: {res_json}") # Added debug log
         for entity in res_json.get("entities", []):
             entity_id = None
             # Check for 'id' in a case-insensitive manner
@@ -227,7 +228,7 @@ def run_community_detection(data):
     Performs hierarchical community detection using the Leiden algorithm in Memgraph.
     """
     try:
-        community_query = "CALL leiden_community_detection.get() YIELD node, community_id, communities"
+        community_query = "CALL leiden_community_detection.get({weight_property: \"weight\", gamma: 1.0, theta: 0.01, resolution_parameter: 0.01, max_iterations: 100}) YIELD node, community_id, communities"
         result = memgraph_graph.query(community_query)
         
         if not result:
