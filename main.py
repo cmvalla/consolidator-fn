@@ -223,6 +223,9 @@ def load_to_memgraph(data):
     return data
 
 def run_community_detection(data):
+    """
+    Performs hierarchical community detection using the Leiden algorithm in Memgraph.
+    """
     try:
         community_query = "CALL community_detection.leiden() YIELD node, communities"
         result = memgraph_graph.query(community_query)
@@ -286,6 +289,24 @@ def get_community_hierarchy(memgraph_graph):
                     hierarchy[f"level_{i-1}"][parent_community_id]["children"].add(community_id)
     return hierarchy
 
+COMMUNITY_SUMMARY_PROMPT = PromptTemplate(
+    input_variables=["community_id", "entities", "relationships", "children_summaries"],
+    template='''
+    Here is a summary of the community {community_id}:
+
+    Entities:
+    {entities}
+
+    Relationships:
+    {relationships}
+
+    Children Summaries:
+    {children_summaries}
+
+    Please provide a summary of this community.
+    '''
+)
+
 def generate_hierarchical_summaries(data):
     """
     Generates summaries for each community in the hierarchy, from the bottom up.
@@ -303,15 +324,17 @@ def generate_hierarchical_summaries(data):
 
     for community_id, community_data in hierarchy[deepest_level].items():
         entity_ids = community_data["entities"]
-        # Get entities' properties from Memgraph
-        nodes_props = []
-        for entity_id in entity_ids:
-            props = memgraph_graph.query(f"MATCH (e:Entity {{id: '{entity_id}'}}) RETURN e.properties AS props")
-            if props:
-                nodes_props.append(props[0]['props'])
+        
+        # Get entities and relationships from Memgraph
+        entities = memgraph_graph.query(f"MATCH (e:Entity) WHERE e.id IN {entity_ids} RETURN e.properties AS props")
+        relationships = memgraph_graph.query(f"MATCH (e1:Entity)-[r:RELATIONSHIP]->(e2:Entity) WHERE e1.id IN {entity_ids} AND e2.id IN {entity_ids} RETURN r.type AS type, r.properties AS props")
 
-        community_text = " ".join([str(prop) for prop in nodes_props])
-        summary_prompt = f'Summarize the following collection of related entities in one sentence:\n{community_text}'
+        summary_prompt = COMMUNITY_SUMMARY_PROMPT.format(
+            community_id=community_id,
+            entities=json.dumps(entities, indent=2),
+            relationships=json.dumps(relationships, indent=2),
+            children_summaries=""
+        )
         summary = llm.invoke(summary_prompt)
         summaries[f"level_{deepest_level_num}_community_{community_id}"] = summary
 
@@ -320,13 +343,24 @@ def generate_hierarchical_summaries(data):
         level = f"level_{i}"
         for community_id, community_data in hierarchy[level].items():
             child_summaries = [summaries[f"level_{i+1}_community_{child_id}"] for child_id in community_data["children"]]
-            community_text = " ".join(child_summaries)
-            summary_prompt = f'Summarize the following collection of summaries in one sentence:\n{community_text}'
+            
+            # Get entities and relationships from Memgraph
+            entity_ids = community_data["entities"]
+            entities = memgraph_graph.query(f"MATCH (e:Entity) WHERE e.id IN {entity_ids} RETURN e.properties AS props")
+            relationships = memgraph_graph.query(f"MATCH (e1:Entity)-[r:RELATIONSHIP]->(e2:Entity) WHERE e1.id IN {entity_ids} AND e2.id IN {entity_ids} RETURN r.type AS type, r.properties AS props")
+
+            summary_prompt = COMMUNITY_SUMMARY_PROMPT.format(
+                community_id=community_id,
+                entities=json.dumps(entities, indent=2),
+                relationships=json.dumps(relationships, indent=2),
+                children_summaries="\n".join(child_summaries)
+            )
             summary = llm.invoke(summary_prompt)
             summaries[f"level_{i}_community_{community_id}"] = summary
     
     data["summaries"] = [{"community_id": key, "summary": value} for key, value in summaries.items()]
     return data
+
 
 def store_summaries(data):
     for summary_data in data["summaries"]:
