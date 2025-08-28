@@ -173,6 +173,9 @@ def cluster_and_merge_entities(data):
     llm_response = chain.run(entities=entity_list_str)
 
     try:
+        # Attempt to extract JSON from markdown code block if present
+        if llm_response.startswith("```json") and llm_response.endswith("```"):
+            llm_response = llm_response.lstrip("```json").rstrip("```").strip()
         entity_id_map = json.loads(llm_response)
     except json.JSONDecodeError:
         logging.error(f"Failed to decode JSON from LLM response: {llm_response}")
