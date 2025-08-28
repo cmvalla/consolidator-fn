@@ -114,7 +114,7 @@ def aggregate_results(data):
                 all_entities[entity_id] = entity
             else:
                 logging.warning(f"Skipping entity without id: {entity}")
-        all_relationships.extend(res_json.get("relationships", []))
+        all_relationships.extend(res_json.get("extracted_graph_data", {}).get("relationships", [])) # Corrected path to relationships
     
     logging.info(f"Aggregated {len(all_entities)} entities and {len(all_relationships)} relationships.")
 
