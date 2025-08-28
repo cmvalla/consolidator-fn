@@ -404,40 +404,60 @@ def migrate_to_spanner(data):
 
     logging.info(f"Migrating {len(entities_to_insert)} entities, {len(relationships_to_insert)} relationships, {len(communities_to_insert)} communities, and {len(entity_community_to_insert)} entity-community relationships to Spanner.")
 
-
     # Only run transaction if there is data to insert
     if not any([entities_to_insert, relationships_to_insert, communities_to_insert, entity_community_to_insert]):
         logging.info("No new data to migrate to Spanner.")
         return data
 
-    # Load data into Spanner
-    def insert_data(transaction):
-        if entities_to_insert:
+    # Define batch size
+    BATCH_SIZE = 5000 # Spanner limit is 80000 mutations per transaction
+
+    # Helper to chunk a list
+    def chunk_list(lst, n):
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
+
+    # Load data into Spanner in batches
+    for batch in chunk_list(entities_to_insert, BATCH_SIZE):
+        def insert_entities_batch(transaction):
             transaction.insert_or_update(
                 table="Entities",
                 columns=("EntityId", "Type", "Properties"),
-                values=entities_to_insert,
+                values=batch,
             )
-        if relationships_to_insert:
+        spanner_database.run_in_transaction(insert_entities_batch)
+        logging.info(f"Inserted {len(batch)} entities into Spanner.")
+
+    for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
+        def insert_relationships_batch(transaction):
             transaction.insert_or_update(
                 table="Relationships",
                 columns=("EntityId", "RelationshipId", "TargetEntityId", "Type", "Properties"),
-                values=relationships_to_insert,
+                values=batch,
             )
-        if communities_to_insert:
+        spanner_database.run_in_transaction(insert_relationships_batch)
+        logging.info(f"Inserted {len(batch)} relationships into Spanner.")
+
+    for batch in chunk_list(communities_to_insert, BATCH_SIZE):
+        def insert_communities_batch(transaction):
             transaction.insert_or_update(
                 table="Communities",
                 columns=("CommunityId", "Summary", "Embedding"),
-                values=communities_to_insert,
+                values=batch,
             )
-        if entity_community_to_insert:
+        spanner_database.run_in_transaction(insert_communities_batch)
+        logging.info(f"Inserted {len(batch)} communities into Spanner.")
+
+    for batch in chunk_list(entity_community_to_insert, BATCH_SIZE):
+        def insert_entity_community_batch(transaction):
             transaction.insert_or_update(
                 table="EntityCommunity",
                 columns=("EntityId", "CommunityId"),
-                values=entity_community_to_insert,
+                values=batch,
             )
+        spanner_database.run_in_transaction(insert_entity_community_batch)
+        logging.info(f"Inserted {len(batch)} entity-community relationships into Spanner.")
 
-    spanner_database.run_in_transaction(insert_data)
     logging.info("Data migrated to Spanner successfully.")
     return data
 
