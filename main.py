@@ -227,7 +227,7 @@ def run_community_detection(data):
     Performs hierarchical community detection using the Leiden algorithm in Memgraph.
     """
     try:
-        community_query = "CALL community_detection.leiden() YIELD node, communities"
+        community_query = "CALL leiden_community_detection.get({weight_property: 'weight', gamma: 1.0, theta: 0.01, resolution_parameter: 0.01, max_iterations: 100}) YIELD node, community_id, communities"
         result = memgraph_graph.query(community_query)
         
         if not result:
