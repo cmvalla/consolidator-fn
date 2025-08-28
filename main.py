@@ -102,7 +102,7 @@ def aggregate_results(data):
     for res_str in data["partial_results"]:
         res_json = json.loads(res_str)
         logging.info(f"DEBUG: Processing res_json: {res_json}") # Added debug log
-        for entity in res_json.get("entities", []):
+        for entity in res_json.get("extracted_graph_data", {}).get("entities", []): # Corrected path to entities
             entity_id = None
             # Check for 'id' in a case-insensitive manner
             for key in entity.keys():
