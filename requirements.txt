@@ -4,7 +4,7 @@ redis==6.4.0
 langchain-community==0.3.29
 langchain-google-vertexai==2.0.28
 langchain==0.3.27
-langchain-core==0.3.74
+langchain-core==0.3.75
 langchain-text-splitters==0.3.9
 langsmith==0.4.16
 google-cloud-secret-manager==2.24.0
