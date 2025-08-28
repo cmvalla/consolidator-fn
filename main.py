@@ -14,9 +14,6 @@ import google.cloud.secretmanager as secretmanager
 import time
 import google.cloud.spanner_v1 as spanner
 import psutil
-from thefuzz import fuzz
-from sklearn.cluster import AgglomerativeClustering
-import numpy as np
 
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
@@ -128,8 +125,9 @@ def aggregate_results(data):
 
 def cluster_and_merge_entities(data):
     """
-    Clusters similar entities based on name similarity and merges them.
-    Updates relationships to point to the new merged entities.
+    Clusters similar entities based on name similarity using an LLM.
+    This approach is inspired by the clustering feature in the kg-gen repository:
+    https://github.com/stair-lab/kg-gen
     """
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
@@ -137,38 +135,61 @@ def cluster_and_merge_entities(data):
     if not entities:
         return data
 
-    # Extract entity names and IDs
-    entity_names = [entity.get("properties", {}).get("name", "") for entity in entities]
-    entity_ids = [entity.get("id") for entity in entities]
+    # Create a prompt for the LLM to cluster entities.
+    prompt = PromptTemplate(
+        input_variables=["entities"],
+        template="""
+        From the following list of entities, identify entities that refer to the same real-world object and group them.
+        For each group, choose one canonical entity and provide a mapping from the old entity IDs to the new canonical entity ID.
 
-    # Calculate similarity matrix
-    similarity_matrix = np.zeros((len(entity_names), len(entity_names)))
-    for i in range(len(entity_names)):
-        for j in range(i, len(entity_names)):
-            similarity = fuzz.token_set_ratio(entity_names[i], entity_names[j]) / 100.0
-            similarity_matrix[i, j] = similarity
-            similarity_matrix[j, i] = similarity
+        Example:
+        Input:
+        [
+            {{"id": "1", "type": "Person", "properties": {{"name": "Bill Gates"}}}},
+            {{"id": "2", "type": "Person", "properties": {{"name": "William Henry Gates III"}}}},
+            {{"id": "3", "type": "Organization", "properties": {{"name": "Microsoft"}}}}
+        ]
 
-    # Perform clustering
-    clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=0.8, affinity='precomputed', linkage='average')
-    clusters = clustering.fit_predict(1 - similarity_matrix)
+        Output:
+        {{
+            "1": "1",
+            "2": "1",
+            "3": "3"
+        }}
 
-    # Create merged entities and ID mapping
-    merged_entities = {}
-    entity_id_map = {}
-    for i, cluster_id in enumerate(clusters):
-        if cluster_id not in merged_entities:
-            merged_entities[cluster_id] = {
-                "id": f"merged-{cluster_id}",
-                "type": "MergedEntity",
-                "properties": {"merged_entities": []}
-            }
-        
-        original_entity = entities[i]
-        merged_entities[cluster_id]["properties"]["merged_entities"].append(original_entity)
-        entity_id_map[original_entity["id"]] = merged_entities[cluster_id]["id"]
+        Entities:
+        {entities}
 
-    # Update relationships
+        Mapping:
+        """
+    )
+
+    # Create a chain to run the LLM.
+    chain = LLMChain(llm=llm, prompt=prompt)
+
+    # Run the chain.
+    entity_list_str = json.dumps(entities, indent=2)
+    llm_response = chain.run(entities=entity_list_str)
+
+    try:
+        entity_id_map = json.loads(llm_response)
+    except json.JSONDecodeError:
+        logging.error(f"Failed to decode JSON from LLM response: {llm_response}")
+        return data # or handle the error in a more sophisticated way
+
+    # Create new entities and relationships.
+    new_entities = {}
+    for entity in entities:
+        canonical_id = entity_id_map.get(entity["id"])
+        if canonical_id:
+            if canonical_id not in new_entities:
+                new_entities[canonical_id] = {
+                    "id": canonical_id,
+                    "type": "MergedEntity",
+                    "properties": {"merged_entities": []}
+                }
+            new_entities[canonical_id]["properties"]["merged_entities"].append(entity)
+
     updated_relationships = []
     for rel in relationships:
         source_id = entity_id_map.get(rel.get("source"))
@@ -181,10 +202,10 @@ def cluster_and_merge_entities(data):
                 "properties": rel.get("properties")
             })
 
-    data["entities"] = list(merged_entities.values())
+    data["entities"] = list(new_entities.values())
     data["relationships"] = updated_relationships
     
-    logging.info(f"Clustered {len(entities)} entities into {len(merged_entities)} merged entities.")
+    logging.info(f"Clustered {len(entities)} entities into {len(new_entities)} merged entities.")
 
     return data
 
