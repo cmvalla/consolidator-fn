@@ -40,24 +40,19 @@ def ensure_spanner_graph_exists(database):
         logging.info("Attempting to create Spanner property graph 'my_graph'...")
         
         ddl_statement = """
-        CREATE PROPERTY GRAPH my_graph (
-            NODE TABLE Entities (
-                PRIMARY KEY (EntityId)
-            ),
-            NODE TABLE Communities (
-                PRIMARY KEY (CommunityId)
-            ),
-            EDGE TABLE Relationships (
-                PRIMARY KEY (EntityId, RelationshipId),
-                SOURCE KEY (EntityId) REFERENCES Entities (EntityId),
-                TARGET KEY (TargetEntityId) REFERENCES Entities (EntityId)
-            ),
-            EDGE TABLE EntityCommunity (
-                PRIMARY KEY (EntityId, CommunityId),
-                SOURCE KEY (EntityId) REFERENCES Entities (EntityId),
-                TARGET KEY (CommunityId) REFERENCES Communities (CommunityId)
+        CREATE PROPERTY GRAPH my_graph
+            NODE TABLES (
+                Entities,
+                Communities
             )
-        )
+            EDGE TABLES (
+                Relationships
+                    SOURCE KEY (EntityId) REFERENCES Entities (EntityId)
+                    DESTINATION KEY (TargetEntityId) REFERENCES Entities (EntityId),
+                EntityCommunity
+                    SOURCE KEY (EntityId) REFERENCES Entities (EntityId)
+                    DESTINATION KEY (CommunityId) REFERENCES Communities (CommunityId)
+            )
         """
         
         operation = database.update_ddl([ddl_statement])
