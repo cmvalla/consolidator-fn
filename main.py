@@ -177,12 +177,13 @@ def cluster_and_merge_entities(data):
         if llm_response.startswith("```json") and llm_response.endswith("```"):
             llm_response = llm_response.lstrip("```json").rstrip("```").strip()
         
-        # Attempt to find the first occurrence of '{' and last occurrence of '}'
-        # to handle cases where LLM adds conversational text outside the JSON block
-        json_start = llm_response.find('{')
-        json_end = llm_response.rfind('}')
-        if json_start != -1 and json_end != -1:
-            llm_response = llm_response[json_start : json_end + 1]
+        # Use regex to find the JSON object, robust to leading/trailing text
+        json_match = re.search(r"\{.*\}", llm_response, re.DOTALL)
+        if json_match:
+            llm_response = json_match.group(0)
+        else:
+            logging.error(f"No JSON object found in LLM response: {llm_response}")
+            return data # or handle the error in a more sophisticated way
 
         entity_id_map = json.loads(llm_response)
     except json.JSONDecodeError:
@@ -230,8 +231,10 @@ def load_to_memgraph(data):
     relationships = data.get("relationships", [])
     if relationships:
         logging.info(f"Loading {len(relationships)} relationships to Memgraph.")
-        rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[:RELATIONSHIP {type: rel.type, properties: rel.properties, weight: 1}]->(b)"
+        rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[:RELATIONSHIP {type: rel.type, properties: rel.properties, weight: rel.properties.weight}]->(b)" # Use actual weight
         memgraph_graph.query(rel_query, params={'rels': relationships})
+        # Add debug logs for relationships and weights
+        logging.info(f"DEBUG: Sample of relationships loaded to Memgraph: {relationships[:5]}") # Log first 5 relationships
     return data
 
 def run_community_detection(data):
@@ -240,11 +243,15 @@ def run_community_detection(data):
     """
     try:
         community_query = "CALL leiden_community_detection.get() YIELD node, community_id, communities"
+        logging.info(f"DEBUG: Community detection query: {community_query}") # Log query
         result = memgraph_graph.query(community_query)
         
         if not result:
             logging.warning("Community detection returned no results.")
+            logging.info(f"DEBUG: Community detection result (empty): {result}") # Log empty result
             result = []
+        else:
+            logging.info(f"DEBUG: Community detection result (sample): {result[:5]}") # Log sample of result
 
     except Exception as e:
         logging.error(f"Error running community detection: {e}", exc_info=True)
