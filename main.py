@@ -15,7 +15,7 @@ import google.cloud.secretmanager as secretmanager
 import time
 import google.cloud.spanner_v1 as spanner
 import psutil
-from google.api_core.exceptions import AlreadyExists
+from google.api_core.exceptions import AlreadyExists, FailedPrecondition
 
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
@@ -61,14 +61,10 @@ def ensure_spanner_graph_exists(database):
         operation.result()  # Blocks until the operation is done
         logging.info("Spanner property graph 'my_graph' created successfully.")
 
-    except AlreadyExists:
-        logging.warning("Spanner property graph 'my_graph' already exists. Continuing.")
-    except Exception as e:
-        # It's possible another instance is creating the graph at the same time.
-        if "already exists" in str(e).lower():
-            logging.warning("Graph 'my_graph' already exists. Continuing.")
+    except (AlreadyExists, FailedPrecondition) as e:
+        if "Duplicate name in schema" in str(e) or "already exists" in str(e).lower():
+            logging.warning("Spanner property graph 'my_graph' already exists. Continuing.")
         else:
-            # If it's a different error, we should still raise it.
             logging.error(f"Failed to create Spanner property graph 'my_graph': {e}", exc_info=True)
             raise
 
