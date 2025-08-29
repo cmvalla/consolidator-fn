@@ -350,10 +350,14 @@ def generate_hierarchical_summaries(data):
         entities = memgraph_graph.query(f"MATCH (e:Entity) WHERE e.id IN {entity_ids} RETURN e.id AS id, e.type AS type, e.properties.name AS name")
         relationships = memgraph_graph.query(f"MATCH (e1:Entity)-[r:RELATIONSHIP]->(e2:Entity) WHERE e1.id IN {entity_ids} AND e2.id IN {entity_ids} RETURN e1.id AS source_id, e2.id AS target_id, r.type AS type")
 
+        # Create concise string representations of entities and relationships
+        concise_entities = [f"({e['id']}:{e['type']} - {e.get('name', 'N/A')})" for e in entities]
+        concise_relationships = [f"({r['source_id']})-[:{r['type']}]->({r['target_id']})" for r in relationships]
+
         summary_prompt = COMMUNITY_SUMMARY_PROMPT.format(
             community_id=community_id,
-            entities=json.dumps(entities, indent=2),
-            relationships=json.dumps(relationships, indent=2),
+            entities="\n".join(concise_entities),
+            relationships="\n".join(concise_relationships),
             children_summaries=""
         )
         summary = llm.invoke(summary_prompt)
