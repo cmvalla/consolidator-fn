@@ -15,6 +15,7 @@ import google.cloud.secretmanager as secretmanager
 import time
 import google.cloud.spanner_v1 as spanner
 import psutil
+from google.api_core.exceptions import AlreadyExists
 
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
@@ -31,15 +32,15 @@ spanner_database = None
 
 def ensure_spanner_graph_exists(database):
     """
-    Unconditionally attempts to create the 'my-graph' Spanner Graph.
+    Unconditionally attempts to create the 'my-graph' Spanner Property Graph.
     If the graph already exists, it will fail gracefully.
-    This approach bypasses the problematic query to information_schema.graphs.
+    This approach bypasses any potential issues with querying information_schema.
     """
     try:
-        logging.info("Attempting to create Spanner graph 'my-graph'...")
+        logging.info("Attempting to create Spanner property graph 'my_graph'...")
         
         ddl_statement = """
-        CREATE GRAPH my_graph (
+        CREATE PROPERTY GRAPH my_graph (
             NODE TABLE Entities (
                 PRIMARY KEY (EntityId)
             ),
@@ -61,18 +62,19 @@ def ensure_spanner_graph_exists(database):
         
         operation = database.update_ddl([ddl_statement])
         
-        logging.info("Waiting for 'CREATE GRAPH' operation to complete... (this may take a few minutes)")
+        logging.info("Waiting for 'CREATE PROPERTY GRAPH' operation to complete... (this may take a few minutes)")
         operation.result()  # Blocks until the operation is done
-        logging.info("Spanner graph 'my-graph' created successfully.")
+        logging.info("Spanner property graph 'my_graph' created successfully.")
 
+    except AlreadyExists:
+        logging.warning("Spanner property graph 'my_graph' already exists. Continuing.")
     except Exception as e:
-        # It's possible another instance is creating the graph at the same time,
-        # or the graph was already there.
+        # It's possible another instance is creating the graph at the same time.
         if "already exists" in str(e).lower():
-            logging.warning("Graph 'my-graph' already exists. Continuing.")
+            logging.warning("Graph 'my_graph' already exists. Continuing.")
         else:
             # If it's a different error, we should still raise it.
-            logging.error(f"Failed to create Spanner graph 'my-graph': {e}", exc_info=True)
+            logging.error(f"Failed to create Spanner property graph 'my_graph': {e}", exc_info=True)
             raise
 
 def initialize_clients():
@@ -134,7 +136,6 @@ def initialize_clients():
         raise  # Re-raise the exception to halt execution if initialization fails
 
 # --- LangChain Runnables ---
-
 def decode_pubsub_message(cloud_event):
     message_data = base64.b64decode(cloud_event.data["message"]["data"]).decode("utf-8")
     message_json = json.loads(message_data)
@@ -447,7 +448,6 @@ def generate_hierarchical_summaries(data):
     
     data["summaries"] = [{"community_id": key, "summary": value} for key, value in summaries.items()]
     return data
-
 
 def store_summaries(data):
     for summary_data in data["summaries"]:
