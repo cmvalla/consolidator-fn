@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import os
 import functions_framework
 import google.cloud.logging
