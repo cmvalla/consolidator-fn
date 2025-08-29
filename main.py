@@ -243,10 +243,16 @@ def run_community_detection(data):
     Performs hierarchical community detection using the Leiden algorithm in Memgraph.
     """
     try:
+        # Log Memgraph counts immediately before running community detection
+        node_count_before_leiden = memgraph_graph.query("MATCH (n) RETURN count(n) AS count")[0]['count']
+        rel_count_before_leiden = memgraph_graph.query("MATCH ()-[r]->() RETURN count(r) AS count")[0]['count']
+        logging.info(f"DEBUG: Memgraph contains {node_count_before_leiden} nodes and {rel_count_before_leiden} relationships BEFORE Leiden query.")
+
         community_query = "CALL leiden_community_detection.get() YIELD node, community_id, communities"
         logging.info(f"DEBUG: Community detection query: {community_query}") # Log query
         result = memgraph_graph.query(community_query)
         
+        logging.info(f"DEBUG: Raw result from Memgraph query: {result}") # Log raw result
         if not result:
             logging.warning("Community detection returned no results.")
             logging.info(f"DEBUG: Community detection result (empty): {result}") # Log empty result
@@ -374,11 +380,18 @@ def generate_hierarchical_summaries(data):
             entities = memgraph_graph.query(f"MATCH (e:Entity) WHERE e.id IN {entity_ids} RETURN e.properties AS props")
             relationships = memgraph_graph.query(f"MATCH (e1:Entity)-[r:RELATIONSHIP]->(e2:Entity) WHERE e1.id IN {entity_ids} AND e2.id IN {entity_ids} RETURN r.type AS type, r.properties AS props")
 
+            # Create concise string representations of entities and relationships for upper levels
+            concise_entities_upper = [f"({e.get('id', 'N/A')}:{e.get('type', 'N/A')} - {e.get('properties', {}).get('name', 'N/A')})" for e in entities]
+            concise_relationships_upper = [f"({r.get('source_id', 'N/A')})-[:{r.get('type', 'N/A')}]->({r.get('target_id', 'N/A')})" for r in relationships]
+
+            # Limit children summaries to prevent token limit issues
+            limited_child_summaries = child_summaries[:5] # Take only the first 5 summaries
+
             summary_prompt = COMMUNITY_SUMMARY_PROMPT.format(
                 community_id=community_id,
-                entities=json.dumps(entities, indent=2),
-                relationships=json.dumps(relationships, indent=2),
-                children_summaries="\n".join(child_summaries)
+                entities="\n".join(concise_entities_upper),
+                relationships="\n".join(concise_relationships_upper),
+                children_summaries="\n".join(limited_child_summaries)
             )
             summary = llm.invoke(summary_prompt)
             summaries[f"level_{i}_community_{community_id}"] = summary
