@@ -31,21 +31,12 @@ spanner_database = None
 
 def ensure_spanner_graph_exists(database):
     """
-    Checks if the 'my-graph' Spanner Graph exists and creates it if it doesn't.
-    The DDL is based on the tables populated by the migrate_to_spanner function.
+    Unconditionally attempts to create the 'my-graph' Spanner Graph.
+    If the graph already exists, it will fail gracefully.
+    This approach bypasses the problematic query to information_schema.graphs.
     """
     try:
-        with database.snapshot() as snapshot:
-            results = snapshot.execute_sql(
-                "SELECT 1 FROM information_schema.graphs WHERE graph_name = 'my-graph'"
-            )
-            graph_exists = any(results)
-
-        if graph_exists:
-            logging.info("Spanner graph 'my-graph' already exists.")
-            return
-
-        logging.info("Spanner graph 'my-graph' not found. Creating it now...")
+        logging.info("Attempting to create Spanner graph 'my-graph'...")
         
         ddl_statement = """
         CREATE GRAPH my_graph (
@@ -75,11 +66,13 @@ def ensure_spanner_graph_exists(database):
         logging.info("Spanner graph 'my-graph' created successfully.")
 
     except Exception as e:
-        # It's possible another instance is creating the graph at the same time.
-        if "already exists" in str(e):
-            logging.warning(f"Graph 'my-graph' creation failed because it already exists. Race condition likely. Continuing. Error: {e}")
+        # It's possible another instance is creating the graph at the same time,
+        # or the graph was already there.
+        if "already exists" in str(e).lower():
+            logging.warning("Graph 'my-graph' already exists. Continuing.")
         else:
-            logging.error(f"Failed to ensure Spanner graph 'my-graph' exists: {e}", exc_info=True)
+            # If it's a different error, we should still raise it.
+            logging.error(f"Failed to create Spanner graph 'my-graph': {e}", exc_info=True)
             raise
 
 def initialize_clients():
