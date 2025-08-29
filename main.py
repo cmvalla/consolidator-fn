@@ -176,6 +176,14 @@ def cluster_and_merge_entities(data):
         # Attempt to extract JSON from markdown code block if present
         if llm_response.startswith("```json") and llm_response.endswith("```"):
             llm_response = llm_response.lstrip("```json").rstrip("```").strip()
+        
+        # Attempt to find the first occurrence of '{' and last occurrence of '}'
+        # to handle cases where LLM adds conversational text outside the JSON block
+        json_start = llm_response.find('{')
+        json_end = llm_response.rfind('}')
+        if json_start != -1 and json_end != -1:
+            llm_response = llm_response[json_start : json_end + 1]
+
         entity_id_map = json.loads(llm_response)
     except json.JSONDecodeError:
         logging.error(f"Failed to decode JSON from LLM response: {llm_response}")
