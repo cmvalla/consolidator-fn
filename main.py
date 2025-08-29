@@ -29,6 +29,59 @@ spanner_client = None
 spanner_instance = None
 spanner_database = None
 
+def ensure_spanner_graph_exists(database):
+    """
+    Checks if the 'my-graph' Spanner Graph exists and creates it if it doesn't.
+    The DDL is based on the tables populated by the migrate_to_spanner function.
+    """
+    try:
+        with database.snapshot() as snapshot:
+            results = snapshot.execute_sql(
+                "SELECT 1 FROM information_schema.graphs WHERE graph_name = 'my-graph'"
+            )
+            graph_exists = any(results)
+
+        if graph_exists:
+            logging.info("Spanner graph 'my-graph' already exists.")
+            return
+
+        logging.info("Spanner graph 'my-graph' not found. Creating it now...")
+        
+        ddl_statement = """
+        CREATE GRAPH my_graph (
+            NODE TABLE Entities (
+                PRIMARY KEY (EntityId)
+            ),
+            NODE TABLE Communities (
+                PRIMARY KEY (CommunityId)
+            ),
+            EDGE TABLE Relationships (
+                PRIMARY KEY (EntityId, RelationshipId),
+                SOURCE KEY (EntityId) REFERENCES Entities (EntityId),
+                TARGET KEY (TargetEntityId) REFERENCES Entities (EntityId)
+            ),
+            EDGE TABLE EntityCommunity (
+                PRIMARY KEY (EntityId, CommunityId),
+                SOURCE KEY (EntityId) REFERENCES Entities (EntityId),
+                TARGET KEY (CommunityId) REFERENCES Communities (CommunityId)
+            )
+        )
+        """
+        
+        operation = database.update_ddl([ddl_statement])
+        
+        logging.info("Waiting for 'CREATE GRAPH' operation to complete... (this may take a few minutes)")
+        operation.result()  # Blocks until the operation is done
+        logging.info("Spanner graph 'my-graph' created successfully.")
+
+    except Exception as e:
+        # It's possible another instance is creating the graph at the same time.
+        if "already exists" in str(e):
+            logging.warning(f"Graph 'my-graph' creation failed because it already exists. Race condition likely. Continuing. Error: {e}")
+        else:
+            logging.error(f"Failed to ensure Spanner graph 'my-graph' exists: {e}", exc_info=True)
+            raise
+
 def initialize_clients():
     """Initializes all external clients."""
     global redis_client, llm, memgraph_graph, spanner_client, spanner_instance, spanner_database
@@ -78,6 +131,9 @@ def initialize_clients():
         spanner_instance = spanner_client.instance(SPANNER_INSTANCE_ID)
         spanner_database = spanner_instance.database(SPANNER_DATABASE_ID)
         logging.info("Spanner client initialized successfully.")
+
+        # Ensure the Spanner Graph exists
+        ensure_spanner_graph_exists(spanner_database)
 
         logging.info("All global clients initialized successfully.")
     except Exception as e:
@@ -576,4 +632,3 @@ def consolidator(cloud_event):
     except Exception as e:
         logging.error(f'An error occurred in the consolidator: {e}', exc_info=True)
         return "Internal Server Error", 500
-
