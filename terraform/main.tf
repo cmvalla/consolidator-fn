@@ -94,7 +94,13 @@ resource "google_project_iam_member" "consolidator_sa_user" {
   member  = "serviceAccount:${var.consolidator_sa_email}"
 }
 
-
+resource "google_cloud_run_v2_service_iam_member" "embedding_invoker" {
+  project  = var.project_id
+  name     = "graphrag-embedding"
+  location = var.location
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${var.consolidator_sa_email}"
+}
 
 resource "google_eventarc_trigger" "consolidator_trigger" {
   project  = var.project_id
