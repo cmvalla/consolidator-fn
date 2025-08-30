@@ -214,8 +214,8 @@ def cluster_and_merge_entities(data):
     # Promote and aggregate relationships
     promoted_rels = {}
     for rel in relationships:
-        source_class_id = f"class_{entity_id_map.get(rel["source"], rel["source"])}"
-        target_class_id = f"class_{entity_id_map.get(rel["target"], rel["target"])}"
+        source_class_id = f"class_{entity_id_map.get(rel['source'], rel['source'])}"
+        target_class_id = f"class_{entity_id_map.get(rel['target'], rel['target'])}"
         rel_type = rel["type"]
         weight = rel.get("properties", {}).get("weight", 1.0)
 
