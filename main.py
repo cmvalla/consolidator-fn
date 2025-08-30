@@ -16,8 +16,8 @@ import time
 import google.cloud.spanner_v1 as spanner
 import psutil
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
-from sentence_transformers import SentenceTransformer
-import numpy as np
+
+
 
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
@@ -31,7 +31,7 @@ memgraph_graph = None
 spanner_client = None
 spanner_instance = None
 spanner_database = None
-embedding_model = None
+
 
 def ensure_spanner_graph_exists(database):
     """
@@ -91,9 +91,7 @@ def initialize_clients():
         spanner_database = spanner_instance.database(SPANNER_DATABASE_ID)
         logging.info("Spanner client initialized successfully.")
 
-        logging.info("Loading embedding model...")
-        embedding_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-        logging.info("Embedding model loaded successfully.")
+        
 
         logging.info("All global clients initialized successfully.")
     except Exception as e:
@@ -133,13 +131,31 @@ def aggregate_results(data):
         "relationships": all_relationships
     }
 
+import requests
+
 def generate_embeddings(data):
-    """Generates embeddings for all entities."""
+    """Generates embeddings for all entities by calling the embedding service."""
+    embedding_service_url = os.environ.get("EMBEDDING_SERVICE_URL")
+    if not embedding_service_url:
+        logging.error("EMBEDDING_SERVICE_URL environment variable not set.")
+        # Decide how to handle this error: raise exception, return data as is, etc.
+        # For now, let's return the data without embeddings.
+        return data
+
     entities = data.get("entities", [])
     for entity in entities:
         text_to_embed = f"Type: {entity.get('type', '')}, Properties: {json.dumps(entity.get('properties', {}))}"
-        embedding = embedding_model.encode(text_to_embed).tolist()
-        entity['embedding'] = embedding
+        try:
+            response = requests.post(embedding_service_url, json={"text": text_to_embed})
+            response.raise_for_status()  # Raise an exception for bad status codes
+            embedding = response.json().get("embedding")
+            if embedding:
+                entity['embedding'] = embedding
+            else:
+                logging.warning(f"Embedding not found in response for entity: {entity.get('id')}")
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error calling embedding service for entity {entity.get('id')}: {e}")
+            # Decide how to handle this error, e.g., skip embedding for this entity
     return data
 
 def cluster_and_merge_entities(data):

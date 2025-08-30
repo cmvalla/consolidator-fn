@@ -77,8 +77,15 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "LOCATION"
           value = var.region
         }
+        env {
+          name  = "EMBEDDING_SERVICE_URL"
+          value = data.google_cloud_run_v2_service.embedding_service.uri
+        }
       }
   }
+  depends_on = [
+    data.google_cloud_run_v2_service.embedding_service
+  ]
 }
 
 resource "google_project_iam_member" "consolidator_sa_user" {
@@ -119,4 +126,9 @@ resource "google_eventarc_trigger" "consolidator_trigger" {
 data "google_pubsub_topic" "consolidator" {
   name = var.topic_name
   project  = var.project_id
+}
+
+data "google_cloud_run_v2_service" "embedding_service" {
+  name     = "graphrag-embedding"
+  location = var.location
 }
