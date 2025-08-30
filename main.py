@@ -137,6 +137,7 @@ import requests
 def generate_embeddings(data):
     """Generates embeddings for all entities by calling the embedding service."""
     embedding_service_url = os.environ.get("EMBEDDING_SERVICE_URL")
+    logging.info(f"Embedding service URL: {embedding_service_url}")
     if not embedding_service_url:
         logging.error("EMBEDDING_SERVICE_URL environment variable not set.")
         # Decide how to handle this error: raise exception, return data as is, etc.
@@ -146,8 +147,11 @@ def generate_embeddings(data):
     entities = data.get("entities", [])
     for entity in entities:
         text_to_embed = f"Type: {entity.get('type', '')}, Properties: {json.dumps(entity.get('properties', {}))}"
+        logging.info(f"Generating embedding for: {text_to_embed}")
         try:
             response = requests.post(embedding_service_url, json={"text": text_to_embed})
+            logging.info(f"Embedding service response status: {response.status_code}")
+            logging.info(f"Embedding service response text: {response.text}")
             response.raise_for_status()  # Raise an exception for bad status codes
             embedding = response.json().get("embedding")
             if embedding:
