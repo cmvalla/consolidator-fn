@@ -201,8 +201,25 @@ def cluster_and_merge_entities(data):
         json_match = re.search(r"\{.*\}", llm_response, re.DOTALL)
         if not json_match:
             logging.error(f"No JSON object found in LLM response: {llm_response}")
-            return data
-        entity_id_map = json.loads(json_match.group(0))
+            # Fallback to a simple list of dictionaries if the first parse fails
+            try:
+                json_match = re.search(r"\[.*\]", llm_response, re.DOTALL)
+                if not json_match:
+                    logging.error(f"No JSON array found in LLM response: {llm_response}")
+                    return data
+                entity_id_map_list = json.loads(json_match.group(0))
+                entity_id_map = {}
+                for item in entity_id_map_list:
+                    canonical_id = item.get("canonical_id")
+                    mapping = item.get("mapping")
+                    if canonical_id and mapping:
+                        for entity_id in mapping.keys():
+                            entity_id_map[entity_id] = canonical_id
+            except json.JSONDecodeError:
+                logging.error(f"Failed to decode JSON from LLM response: {llm_response}")
+                return data
+        else:
+            entity_id_map = json.loads(json_match.group(0))
     except json.JSONDecodeError:
         logging.error(f"Failed to decode JSON from LLM response: {llm_response}")
         return data
