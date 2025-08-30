@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Expose the port the function is listening on
-EXPOSE 8080
+EXPOSE 8080 
 
 # Define the command to run the application
 CMD ["functions-framework", "--target=consolidator", "--source=main.py"]
