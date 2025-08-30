@@ -207,72 +207,51 @@ def cluster_and_merge_entities(data):
         logging.error(f"Failed to decode JSON from LLM response: {llm_response}")
         return data
 
-    grouped_entities = {}
-    for entity in entities:
-        canonical_id = entity_id_map.get(entity["id"], entity["id"])
-        if canonical_id not in grouped_entities:
-            grouped_entities[canonical_id] = []
-        grouped_entities[canonical_id].append(entity)
+    # Create a map from old entity ids to new class ids
+    class_id_map = {}
+    for entity_id, canonical_id in entity_id_map.items():
+        class_id_map[entity_id] = f"class_{canonical_id}"
 
     new_entities = []
-    instance_of_relationships = []
+    new_relationships = []
 
-    for canonical_id, group in grouped_entities.items():
-        if len(group) > 1:
-            common_properties = group[0].get("properties", {}).copy()
-            for entity in group[1:]:
-                entity_properties = entity.get("properties", {})
-                common_keys = common_properties.keys() & entity_properties.keys()
-                common_properties = {k: common_properties[k] for k in common_keys if common_properties[k] == entity_properties[k]}
+    # Create class nodes
+    for canonical_id in set(entity_id_map.values()):
+        class_entity = {
+            "id": f"class_{canonical_id}",
+            "type": "Class",
+            "properties": {},
+            "embedding": []
+        }
+        new_entities.append(class_entity)
 
-            class_entity = {
-                "id": f"class_{canonical_id}",
-                "type": "Class",
-                "properties": common_properties,
-                "embedding": np.mean([e['embedding'] for e in group if 'embedding' in e], axis=0).tolist()
+    # Create instance nodes and INSTANCE_OF relationships
+    for entity in entities:
+        entity["type"] = "Instance"
+        new_entities.append(entity)
+        
+        class_id = class_id_map.get(entity["id"])
+        if class_id:
+            instance_of_rel = {
+                "source": entity["id"],
+                "target": class_id,
+                "type": "INSTANCE_OF"
             }
-            new_entities.append(class_entity)
+            new_relationships.append(instance_of_rel)
 
-            for entity in group:
-                entity["type"] = "Instance"
-                instance_of_relationships.append({"source": entity["id"], "target": class_entity["id"], "type": "INSTANCE_OF"})
-                new_entities.append(entity)
-        else:
-            entity = group[0]
-            entity["type"] = "Class"
-            new_entities.append(entity)
-
-    # Promote and aggregate relationships
-    promoted_rels = {}
+    # Update relationships
     for rel in relationships:
-        if rel.get('source') in entity_id_map and rel.get('target') in entity_id_map:
-            source_class_id = f"class_{entity_id_map.get(rel['source'], rel['source'])}"
-            target_class_id = f"class_{entity_id_map.get(rel['target'], rel['target'])}"
-            rel_type = rel["type"]
-            weight = rel.get("properties", {}).get("weight", 1.0)
-
-            rel_key = (source_class_id, target_class_id, rel_type)
-            if rel_key not in promoted_rels:
-                promoted_rels[rel_key] = {"weights": [], "properties": rel.get("properties", {})}
-            promoted_rels[rel_key]["weights"].append(weight)
-
-    aggregated_relationships = []
-    for (source, target, type), data_rel in promoted_rels.items():
-        avg_weight = np.mean(data_rel["weights"])
-        final_properties = data_rel["properties"]
-        final_properties["weight"] = avg_weight
-        final_properties["original_relations_count"] = len(data_rel["weights"])
-        aggregated_relationships.append({
-            "source": source,
-            "target": target,
-            "type": type,
-            "properties": final_properties
-        })
+        source_class_id = class_id_map.get(rel.get("source"))
+        target_class_id = class_id_map.get(rel.get("target"))
+        if source_class_id and target_class_id:
+            rel["source"] = source_class_id
+            rel["target"] = target_class_id
+            new_relationships.append(rel)
 
     data["entities"] = new_entities
-    data["relationships"] = aggregated_relationships + instance_of_relationships
+    data["relationships"] = new_relationships
     
-    logging.info(f"Clustering complete. Result: {len(new_entities)} entities, {len(aggregated_relationships)} aggregated relationships, {len(instance_of_relationships)} instance-of relationships.")
+    logging.info(f"Clustering complete. Result: {len(new_entities)} entities, {len(new_relationships)} relationships.")
     return data
 
 def load_to_memgraph(data):
