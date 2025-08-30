@@ -6,6 +6,7 @@ import functions_framework
 import google.cloud.logging
 import logging
 import redis
+import numpy as np
 from langchain_community.graphs import MemgraphGraph
 from langchain_google_vertexai import VertexAI
 from langchain.chains import LLMChain
