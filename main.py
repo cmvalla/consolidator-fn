@@ -340,14 +340,18 @@ def load_to_memgraph(data):
 
 def run_community_detection(data):
     """
-    Runs the Leiden community detection algorithm on the graph in Memgraph
+    Runs the Leiden community detection algorithm on the graph of Class nodes in Memgraph
     and stores the community ID on the nodes.
     """
-    logging.info("Running Leiden community detection...")
+    logging.info("Running Leiden community detection on Class nodes...")
     
-    # The Leiden algorithm is part of MAGE, which needs to be installed in Memgraph.
-    # This query calls the procedure and stores the community ID as a property on each node.
-    query = "CALL community_detection.leiden() YIELD node, community_id; "
+    # This query calls the Leiden procedure on the subgraph of Class nodes and their relationships.
+    query = """
+    MATCH (c1:Class)-[r]-(c2:Class)
+    WITH COLLECT(DISTINCT c1) + COLLECT(DISTINCT c2) AS class_nodes, COLLECT(r) AS relationships
+    CALL leiden_community_detection.get_subgraph(class_nodes, relationships) YIELD node, community_id
+    SET node.community_id = community_id
+    """
     
     try:
         memgraph_graph.query(query)
