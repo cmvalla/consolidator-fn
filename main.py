@@ -6,9 +6,10 @@ import functions_framework
 import google.cloud.logging
 import logging
 import redis
+import igraph as ig
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-from langchain_community.graphs import MemgraphGraph
+
 from langchain_google_vertexai import VertexAI
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
@@ -48,7 +49,7 @@ def ensure_spanner_graph_exists(database):
 
 def initialize_clients():
     """Initializes all external clients."""
-    global redis_client, llm, memgraph_graph, spanner_client, spanner_instance, spanner_database, embedding_model
+    global redis_client, llm, spanner_client, spanner_instance, spanner_database, embedding_model
 
     try:
         # Log system resource usage
@@ -63,10 +64,7 @@ def initialize_clients():
         GCP_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT")
         REDIS_HOST = os.environ.get("REDIS_HOST")
         REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
-        MEMGRAPH_HOST = os.environ.get("MEMGRAPH_HOST", "memgraph-service.memgraph.svc.cluster.local")
-        MEMGRAPH_PORT = int(os.environ.get("MEMGRAPH_PORT", 7687))
-        MEMGRAPH_USER = os.environ.get("MEMGRAPH_USER", "memgraph")
-        MEMGRAPH_PASSWORD = os.environ.get("MEMGRAPH_PASSWORD")
+        
         SPANNER_INSTANCE_ID = os.environ.get("SPANNER_INSTANCE_ID")
         SPANNER_DATABASE_ID = os.environ.get("SPANNER_DATABASE_ID")
         LOCATION = os.environ.get("LOCATION")
@@ -87,11 +85,7 @@ def initialize_clients():
         redis_client.ping()
         logging.info("Redis client initialized successfully.")
 
-        logging.info("Initializing Memgraph client...")
-        os.environ["NEO4J_USERNAME"] = MEMGRAPH_USER
-        os.environ["NEO4J_PASSWORD"] = MEMGRAPH_PASSWORD
-        memgraph_graph = MemgraphGraph(url=f"bolt://{MEMGRAPH_HOST}:{MEMGRAPH_PORT}", username=MEMGRAPH_USER, password=MEMGRAPH_PASSWORD)
-        logging.info("Memgraph client initialized successfully.")
+        
 
         logging.info("Initializing Vertex AI...")
         llm = VertexAI(model_name="gemini-2.5-flash", location=LOCATION)
@@ -317,61 +311,58 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     logging.info(f"Clustering complete. Result: {len(new_entities)} entities, {len(new_relationships)} relationships.")
     return data
 
-def load_to_memgraph(data):
-    entities = data.get("entities", [])
-    if entities:
-        logging.info(f"Loading {len(entities)} entities to Memgraph.")
-        instance_query = "UNWIND $nodes AS node MERGE (n:Entity {id: node.id}) SET n += node, n :Instance"
-        class_query = "UNWIND $nodes AS node MERGE (n:Entity {id: node.id}) SET n += node, n :Class"
-        
-        instances = [e for e in entities if e['type'] == 'Instance']
-        classes = [e for e in entities if e['type'] == 'Class']
-        
-        if instances:
-            memgraph_graph.query(instance_query, params={"nodes": instances})
-        if classes:
-            memgraph_graph.query(class_query, params={"nodes": classes})
 
-    relationships = data.get("relationships", [])
-    if relationships:
-        logging.info(f"Loading {len(relationships)} relationships to Memgraph.")
-        rel_query = "UNWIND $rels AS rel MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target}) CREATE (a)-[r:`{rel.type}` {properties: rel.properties}]->(b)"
-        memgraph_graph.query(rel_query, params={"rels": relationships})
+
+
 
     return data
 
-def run_community_detection(data):
-    """
-    Runs the Leiden community detection algorithm on the graph of Class nodes in Memgraph
-    and stores the community ID on the nodes.
-    """
-    logging.info("Running Leiden community detection on Class nodes...")
-    
-    # This query calls the Leiden procedure on the subgraph of Class nodes and their relationships.
-    query = """
-    MATCH (c1:Class)-[r]-(c2:Class)
-    WITH COLLECT(DISTINCT c1) + COLLECT(DISTINCT c2) AS class_nodes, COLLECT(r) AS relationships
-    CALL leiden_community_detection.get_subgraph(class_nodes, relationships) YIELD node, community_id
-    SET node.community_id = community_id
-    """
-    
-    try:
-        memgraph_graph.query(query)
-        logging.info("Leiden community detection completed successfully.")
-    except Exception as e:
-        logging.error(f"Error running Leiden community detection: {e}")
-        # Depending on the desired behavior, you might want to raise the exception
-        # or handle it gracefully. For now, we'll just log the error.
+def run_igraph_community_detection(data):
+    logging.info("Running igraph community detection...")
+    entities = data.get("entities", [])
+    relationships = data.get("relationships", [])
 
+    # Create a mapping from entity ID to igraph vertex ID
+    id_to_vertex = {entity["id"]: i for i, entity in enumerate(entities)}
+    
+    # Create igraph graph
+    g = ig.Graph(directed=False)
+    g.add_vertices(len(entities))
+    g.vs["id"] = [entity["id"] for entity in entities]
+    g.vs["type"] = [entity["type"] for entity in entities]
+    g.vs["properties"] = [entity["properties"] for entity in entities]
+    g.vs["embedding"] = [entity.get("embedding") for entity in entities]
+
+    edges = []
+    for rel in relationships:
+        source_id = rel.get("source")
+        target_id = rel.get("target")
+        if source_id in id_to_vertex and target_id in id_to_vertex:
+            edges.append((id_to_vertex[source_id], id_to_vertex[target_id]))
+    g.add_edges(edges)
+
+    # Find maximal cliques (as a proxy for overlapping communities)
+    # A node can be part of multiple cliques, thus multiple communities
+    cliques = g.maximal_cliques()
+    
+    # Assign communities to entities
+    for entity in entities:
+        entity_id = entity["id"]
+        entity["communities"] = [] # Initialize a list for communities
+        for i, clique in enumerate(cliques):
+            # Check if the entity is in the current clique
+            if id_to_vertex[entity_id] in clique:
+                entity["communities"].append(f"clique_{i}") # Assign a community ID
+
+    logging.info(f"Found {len(cliques)} cliques (overlapping communities).")
     return data
 
 def migrate_to_spanner(data):
-    logging.info("Migrating data to Spanner...")
 
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
 
-    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding", [0.0] * EMBEDDING_DIMENSION)) for e in entities]
+    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding", [0.0] * EMBEDDING_DIMENSION), json.dumps(e.get("communities", []))) for e in entities]
     relationships_to_insert = [(r["source"], r["target"], r["type"], json.dumps(r.get("properties", {}))) for r in relationships if r.get('source') and r.get('target') and r['type'] != 'INSTANCE_OF']
     instance_of_to_insert = [(r["source"], r["target"]) for r in relationships if r.get('source') and r.get('target') and r['type'] == 'INSTANCE_OF']
 
@@ -384,7 +375,7 @@ def migrate_to_spanner(data):
     for batch in chunk_list(entities_to_insert, BATCH_SIZE):
         spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
             table="Entities",
-            columns=("Eid", "Type", "Properties", "Embedding"),
+            columns=("Eid", "Type", "Properties", "Embedding", "Communities"),
             values=batch,
         ))
         logging.info(f"Inserted {len(batch)} entities.")
@@ -414,8 +405,7 @@ consolidation_chain = RunnableSequence(
     aggregate_results,
     generate_embeddings,
     cluster_and_merge_entities,
-    load_to_memgraph,
-    run_community_detection,
+    run_igraph_community_detection,
     migrate_to_spanner,
 )
 
