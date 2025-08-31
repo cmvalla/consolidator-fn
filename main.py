@@ -242,30 +242,22 @@ def cluster_and_merge_entities(data):
     llm_response = chain.run(entities=entity_list_str)
 
     try:
-        json_match = re.search(r"\{.*\}", llm_response, re.DOTALL)
-        if not json_match:
-            logging.error(f"No JSON object found in LLM response: {llm_response}")
-            # Fallback to a simple list of dictionaries if the first parse fails
-            try:
-                json_match = re.search(r"\[.*\]", llm_response, re.DOTALL)
-                if not json_match:
-                    logging.error(f"No JSON array found in LLM response: {llm_response}")
-                    return data
-                entity_id_map_list = json.loads(json_match.group(0))
-                entity_id_map = {}
-                for item in entity_id_map_list:
-                    canonical_id = item.get("canonical_id")
-                    mapping = item.get("mapping")
-                    if canonical_id and mapping:
-                        for entity_id in mapping.keys():
-                            entity_id_map[entity_id] = canonical_id
-            except json.JSONDecodeError:
-                logging.error(f"Failed to decode JSON from LLM response: {llm_response}")
-                return data
+        json_match = re.search(r"```json\n(.*)```", llm_response, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1).strip()
         else:
-            entity_id_map = json.loads(json_match.group(0))
-    except json.JSONDecodeError:
-        logging.error(f"Failed to decode JSON from LLM response: {llm_response}")
+            json_str = llm_response
+
+        entity_id_map_list = json.loads(json_str)
+        entity_id_map = {}
+        for item in entity_id_map_list:
+            canonical_id = item.get("canonical_id")
+            original_ids = item.get("original_ids")
+            if canonical_id and original_ids:
+                for entity_id in original_ids:
+                    entity_id_map[entity_id] = canonical_id
+    except (json.JSONDecodeError, AttributeError) as e:
+        logging.error(f"Failed to decode JSON from LLM response: {llm_response}. Error: {e}")
         return data
 
     # Create a map from old entity ids to new class ids
@@ -314,6 +306,7 @@ def cluster_and_merge_entities(data):
     
     logging.info(f"Clustering complete. Result: {len(new_entities)} entities, {len(new_relationships)} relationships.")
     return data
+
 
 def load_to_memgraph(data):
     entities = data.get("entities", [])
