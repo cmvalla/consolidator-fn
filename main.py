@@ -311,7 +311,7 @@ def migrate_to_spanner(data):
     BATCH_SIZE = 100
 
     for batch in chunk_list(entities_to_insert, BATCH_SIZE):
-        spanner_database.run_in_transaction(lambda transaction: transaction.insert(
+        spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
             table="Entities",
             columns=("Eid", "Type", "Properties", "Embedding"),
             values=batch,
@@ -319,7 +319,7 @@ def migrate_to_spanner(data):
         logging.info(f"Inserted {len(batch)} entities.")
 
     for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
-        spanner_database.run_in_transaction(lambda transaction: transaction.insert(
+        spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
             table="Relationships",
             columns=("SourceEid", "TargetEid", "Type", "Properties"),
             values=batch,
@@ -327,7 +327,7 @@ def migrate_to_spanner(data):
         logging.info(f"Inserted {len(batch)} relationships.")
 
     for batch in chunk_list(instance_of_to_insert, BATCH_SIZE):
-        spanner_database.run_in_transaction(lambda transaction: transaction.insert(
+        spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
             table="InstanceOf",
             columns=("InstanceEid", "ClassEid"),
             values=batch,
