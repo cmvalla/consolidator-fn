@@ -115,6 +115,9 @@ def fetch_from_redis(data):
     batch_id = data["batch_id"]
     results_key = f"batch:{batch_id}:results"
     partial_results_str = redis_client.lrange(results_key, 0, -1)
+    logging.info(f"Fetched {len(partial_results_str)} partial results from Redis for batch {batch_id}.")
+    if not partial_results_str:
+        logging.warning(f"No partial results found in Redis for batch {batch_id}. Key: {results_key}")
     return {"batch_id": batch_id, "partial_results": partial_results_str}
 
 def aggregate_results(data):
