@@ -462,7 +462,7 @@ def migrate_to_spanner(data):
     relationships = data.get("relationships", [])
 
     logging.info(f"Entities before entities_to_insert: {entities[:5]}") # Log first 5 entities
-    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding", [0.0] * EMBEDDING_DIMENSION), json.dumps(e.get("communities", []))) for e in entities]
+    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding", [0.0] * EMBEDDING_DIMENSION), e.get("communities", [])) for e in entities]
     relationships_to_insert = [(hashlib.sha256(f"{r['source']}-{r['target']}-{r['type']}".encode()).hexdigest(), r["source"], r["target"], r["type"], json.dumps(r.get("properties", {}))) for r in relationships if r.get('source') and r.get('source') != '' and r.get('target') and r.get('target') != '' and r['type'] != 'INSTANCE_OF']
     instance_of_to_insert = [(r["source"], r["target"]) for r in relationships if r.get('source') and r.get('source') != '' and r.get('target') and r.get('target') != '' and r['type'] == 'INSTANCE_OF']
 
@@ -484,43 +484,43 @@ def migrate_to_spanner(data):
         ))
         logging.info(f"Inserted {len(batch)} entities.")
 
-    communities_to_insert = [(c["id"], c["summary"], c["embedding"]) for c in data.get("communities", [])]
+    # communities_to_insert = [(c["id"], c["summary"], c["embedding"]) for c in data.get("communities", [])]
 
-    for batch in chunk_list(communities_to_insert, BATCH_SIZE):
-        sample_batch = batch[:5] if len(batch) > 5 else batch
-        logging.info(f"Inserting/updating Communities table. Sample batch ({len(batch)} items): {sample_batch}")
-        community_ids_in_batch = [item[0] for item in batch] # CommunityId is the first element
-        logging.info(f"Communities CommunityIds in batch: {community_ids_in_batch}")
-        spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-            table="Communities",
-            columns=("CommunityId", "Summary", "Embedding"),
-            values=batch,
-        ))
-        logging.info(f"Inserted {len(batch)} communities.")
+    # for batch in chunk_list(communities_to_insert, BATCH_SIZE):
+    #     sample_batch = batch[:5] if len(batch) > 5 else batch
+    #     logging.info(f"Inserting/updating Communities table. Sample batch ({len(batch)} items): {sample_batch}")
+    #     community_ids_in_batch = [item[0] for item in batch] # CommunityId is the first element
+    #     logging.info(f"Communities CommunityIds in batch: {community_ids_in_batch}")
+    #     spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
+    #         table="Communities",
+    #         columns=("CommunityId", "Summary", "Embedding"),
+    #         values=batch,
+    #     ))
+    #     logging.info(f"Inserted {len(batch)} communities.")
 
-    for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
-        sample_batch = batch[:5] if len(batch) > 5 else batch
-        logging.info(f"Inserting/updating Relationships table. Sample batch ({len(batch)} items): {sample_batch}")
-        rids_in_batch = [item[0] for item in batch] # Rid is the first element
-        logging.info(f"Relationships Rids in batch: {rids_in_batch}")
-        spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-            table="Relationships",
-            columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
-            values=batch,
-        ))
-        logging.info(f"Inserted {len(batch)} relationships.")
+    # for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
+    #     sample_batch = batch[:5] if len(batch) > 5 else batch
+    #     logging.info(f"Inserting/updating Relationships table. Sample batch ({len(batch)} items): {sample_batch}")
+    #     rids_in_batch = [item[0] for item in batch] # Rid is the first element
+    #     logging.info(f"Relationships Rids in batch: {rids_in_batch}")
+    #     spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
+    #         table="Relationships",
+    #         columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
+    #         values=batch,
+    #     ))
+    #     logging.info(f"Inserted {len(batch)} relationships.")
 
-    for batch in chunk_list(instance_of_to_insert, BATCH_SIZE):
-        sample_batch = batch[:5] if len(batch) > 5 else batch
-        logging.info(f"Inserting/updating InstanceOf table. Sample batch ({len(batch)} items): {sample_batch}")
-        instance_class_eids_in_batch = [(item[0], item[1]) for item in batch] # (InstanceEid, ClassEid) are the first two elements
-        logging.info(f"InstanceOf InstanceEid, ClassEid in batch: {instance_class_eids_in_batch}")
-        spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-            table="InstanceOf",
-            columns=("InstanceEid", "ClassEid"),
-            values=batch,
-        ))
-        logging.info(f"Inserted {len(batch)} instance-of relationships.")
+    # for batch in chunk_list(instance_of_to_insert, BATCH_SIZE):
+    #     sample_batch = batch[:5] if len(batch) > 5 else batch
+    #     logging.info(f"Inserting/updating InstanceOf table. Sample batch ({len(batch)} items): {sample_batch}")
+    #     instance_class_eids_in_batch = [(item[0], item[1]) for item in batch] # (InstanceEid, ClassEid) are the first two elements
+    #     logging.info(f"InstanceOf InstanceEid, ClassEid in batch: {instance_class_eids_in_batch}")
+    #     spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
+    #         table="InstanceOf",
+    #         columns=("InstanceEid", "ClassEid"),
+    #         values=batch,
+    #     ))
+    #     logging.info(f"Inserted {len(batch)} instance-of relationships.")
 
     return data
 
