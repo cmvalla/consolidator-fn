@@ -141,7 +141,7 @@ def aggregate_results(data):
     }
 
 def generate_embeddings(data):
-    """Generates embeddings for all entities by calling the embedding service with retry logic."""
+    """Generates embeddings for all entities and chunks by calling the embedding service with retry logic."""
     embedding_service_url = os.environ.get("EMBEDDING_SERVICE_URL")
     logging.info(f"Embedding service URL: {embedding_service_url}")
     if not embedding_service_url:
@@ -154,7 +154,20 @@ def generate_embeddings(data):
     MAX_BACKOFF_SECONDS = 600  # 10 minutes
 
     for entity in entities:
-        text_to_embed = f"Type: {entity.get('type', '')}, Properties: {json.dumps(entity.get('properties', {}))}"
+        entity_type = entity.get('type', '')
+        properties = entity.get('properties', {})
+        
+        if entity_type == 'Chunk':
+            text_to_embed = properties.get('summary', '')
+        elif entity_type == 'Community':
+            text_to_embed = properties.get('summary', '')
+        else:
+            text_to_embed = f"Type: {entity_type}, Properties: {json.dumps(properties)}"
+
+        if not text_to_embed:
+            logging.warning(f"Skipping embedding for entity {entity.get('id')} because there is no text to embed.")
+            continue
+
         logging.info(f"Generating embedding for entity: {entity.get('id')}")
         
         # Initialize retry and backoff for each entity
@@ -325,6 +338,27 @@ def load_to_memgraph(data):
 
     return data
 
+def run_community_detection(data):
+    """
+    Runs the Leiden community detection algorithm on the graph in Memgraph
+    and stores the community ID on the nodes.
+    """
+    logging.info("Running Leiden community detection...")
+    
+    # The Leiden algorithm is part of MAGE, which needs to be installed in Memgraph.
+    # This query calls the procedure and stores the community ID as a property on each node.
+    query = "CALL community_detection.leiden() YIELD node, community_id; "
+    
+    try:
+        memgraph_graph.query(query)
+        logging.info("Leiden community detection completed successfully.")
+    except Exception as e:
+        logging.error(f"Error running Leiden community detection: {e}")
+        # Depending on the desired behavior, you might want to raise the exception
+        # or handle it gracefully. For now, we'll just log the error.
+
+    return data
+
 def migrate_to_spanner(data):
     logging.info("Migrating data to Spanner...")
 
@@ -375,9 +409,8 @@ consolidation_chain = RunnableSequence(
     generate_embeddings,
     cluster_and_merge_entities,
     load_to_memgraph,
+    run_community_detection,
     migrate_to_spanner,
-    # ... (add other steps like community detection, summarization etc. back here)
-    #     # cleanup_redis,
 )
 
 # --- Main Function ---
