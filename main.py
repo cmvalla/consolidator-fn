@@ -453,10 +453,15 @@ def run_igraph_community_detection(data):
     return data
 
 def migrate_to_spanner(data):
+    logging.info("Migrating data to Spanner...")
+    logging.info(f"Entities received by migrate_to_spanner: {data.get("entities", [])[:5]}") # Log first 5 entities
+    logging.info(f"Relationships received by migrate_to_spanner: {data.get("relationships", [])[:5]}") # Log first 5 relationships
+    logging.info(f"Communities received by migrate_to_spanner: {data.get("communities", [])[:5]}") # Log first 5 communities
 
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
 
+    logging.info(f"Entities before entities_to_insert: {entities[:5]}") # Log first 5 entities
     entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding", [0.0] * EMBEDDING_DIMENSION), json.dumps(e.get("communities", []))) for e in entities]
     relationships_to_insert = [(hashlib.sha256(f"{r['source']}-{r['target']}-{r['type']}".encode()).hexdigest(), r["source"], r["target"], r["type"], json.dumps(r.get("properties", {}))) for r in relationships if r.get('source') and r.get('source') != '' and r.get('target') and r.get('target') != '' and r['type'] != 'INSTANCE_OF']
     instance_of_to_insert = [(r["source"], r["target"]) for r in relationships if r.get('source') and r.get('source') != '' and r.get('target') and r.get('target') != '' and r['type'] == 'INSTANCE_OF']
