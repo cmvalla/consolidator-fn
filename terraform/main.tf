@@ -11,7 +11,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
       min_instance_count = 0 # Can scale to zero
       max_instance_count = 1
     }
-    max_instance_request_concurrency = 50
+    max_instance_request_concurrency = 1
     vpc_access {
       connector = var.vpc_connector
       egress = "ALL_TRAFFIC"
