@@ -214,6 +214,60 @@ def generate_embeddings(data):
             logging.error(f"Failed to get embedding for entity {entity.get('id')} after {MAX_RETRIES} retries or embedding was empty. Entity details: {json.dumps(entity)}")
             entity['embedding'] = [0.0] * EMBEDDING_DIMENSION
 
+    communities = data.get("communities", [])
+    for community in communities:
+        text_to_embed = community.get("summary", "")
+        community_id = community.get("id", "")
+
+        if not text_to_embed:
+            logging.warning(f"Skipping embedding for community {community_id} because there is no text to embed.")
+            community['embedding'] = [0.0] * EMBEDDING_DIMENSION # Assign zero vector if no text
+            continue
+
+        logging.info(f"Generating embedding for community: {community_id}")
+
+        retries = 0
+        backoff_seconds = INITIAL_BACKOFF_SECONDS
+
+        while retries < MAX_RETRIES:
+            try:
+                token_response = requests.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" + embedding_service_url, headers={"Metadata-Flavor": "Google"})
+                token = token_response.text
+                headers = {"Authorization": f"Bearer {token}"}
+
+                response = requests.post(embedding_service_url, json={"text": text_to_embed}, headers=headers)
+
+                if response.status_code == 200:
+                    logging.info(f"Successfully received embedding for community: {community_id}")
+                    embedding = response.json().get("embedding")
+                    if embedding:
+                        community['embedding'] = embedding
+                    else:
+                        logging.warning(f"Embedding not found in response for community: {community_id}")
+                        community['embedding'] = [0.0] * EMBEDDING_DIMENSION # Assign zero vector if not found
+                    break
+
+                elif response.status_code >= 500:
+                    logging.warning(f"Embedding service returned a server error ({response.status_code}). Retrying in {backoff_seconds} seconds...")
+                    time.sleep(backoff_seconds)
+                    retries += 1
+                    backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
+
+                else:
+                    logging.error(f"Embedding service returned a client error ({response.status_code}): {response.text}")
+                    community['embedding'] = [0.0] * EMBEDDING_DIMENSION # Assign zero vector on client error
+                    response.raise_for_status()
+
+            except requests.exceptions.RequestException as e:
+                logging.error(f"Error calling embedding service for community {community_id}: {e}")
+                time.sleep(backoff_seconds)
+                retries += 1
+                backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
+
+        if retries == MAX_RETRIES or not community.get('embedding'):
+            logging.error(f"Failed to get embedding for community {community_id} after {MAX_RETRIES} retries or embedding was empty. Community details: {json.dumps(community)}")
+            community['embedding'] = [0.0] * EMBEDDING_DIMENSION
+
     return data
 
 def cluster_and_merge_entities(data, similarity_threshold=0.9):
@@ -346,16 +400,53 @@ def run_igraph_community_detection(data):
     # A node can be part of multiple cliques, thus multiple communities
     cliques = g.maximal_cliques()
     
-    # Assign communities to entities
+    # Assign communities to entities and generate community summaries
+    community_summaries = {} # To store text summaries for each community
     for entity in entities:
         entity_id = entity["id"]
         entity["communities"] = [] # Initialize a list for communities
-        for i, clique in enumerate(cliques):
-            # Check if the entity is in the current clique
-            if id_to_vertex[entity_id] in clique:
-                entity["communities"].append(f"clique_{i}") # Assign a community ID
+        
+        # Collect entity details for community summary
+        entity_summary_parts = []
+        if entity.get("type"):
+            entity_summary_parts.append(f"Type: {entity.get('type')}")
+        if entity.get("properties", {}).get("summary"):
+            entity_summary_parts.append(f"Summary: {entity['properties']['summary']}")
+        elif entity.get("properties", {}).get("name"):
+            entity_summary_parts.append(f"Name: {entity['properties']['name']}")
+        
+        entity_text_for_summary = ", ".join(entity_summary_parts) if entity_summary_parts else entity_id
 
-    logging.info(f"Found {len(cliques)} cliques (overlapping communities).")
+        for i, clique in enumerate(cliques):
+            if id_to_vertex[entity_id] in clique:
+                community_id = f"clique_{i}"
+                entity["communities"].append(community_id)
+                
+                # Add entity's text to the community's summary
+                if community_id not in community_summaries:
+                    community_summaries[community_id] = []
+                community_summaries[community_id].append(entity_text_for_summary)
+
+    # Now, create a list of community entities to be inserted into Spanner
+    # This assumes a "Communities" table in Spanner
+    new_communities = []
+    for comm_id, entity_texts in community_summaries.items():
+        # Concatenate entity texts to form a community summary
+        full_community_summary = " ".join(entity_texts)
+        
+        # Here, you would also calculate the embedding for the community summary
+        # For now, we'll leave embedding as empty or average later
+        
+        new_communities.append({
+            "id": comm_id,
+            "summary": full_community_summary,
+            "embedding": [] # Placeholder, will be filled by embedding service or averaging
+        })
+
+    # Add new_communities to the data object to be processed by migrate_to_spanner
+    data["communities"] = new_communities
+
+    logging.info(f"Found {len(cliques)} cliques (overlapping communities) and generated summaries.")
     return data
 
 def migrate_to_spanner(data):
@@ -380,6 +471,16 @@ def migrate_to_spanner(data):
             values=batch,
         ))
         logging.info(f"Inserted {len(batch)} entities.")
+
+    communities_to_insert = [(c["id"], c["summary"], c["embedding"]) for c in data.get("communities", [])]
+
+    for batch in chunk_list(communities_to_insert, BATCH_SIZE):
+        spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
+            table="Communities",
+            columns=("CommunityId", "Summary", "Embedding"),
+            values=batch,
+        ))
+        logging.info(f"Inserted {len(batch)} communities.")
 
     for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
         spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
