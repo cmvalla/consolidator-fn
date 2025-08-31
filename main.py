@@ -242,20 +242,24 @@ def cluster_and_merge_entities(data):
     llm_response = chain.run(entities=entity_list_str)
 
     try:
-        json_match = re.search(r"```json\n(.*)```", llm_response, re.DOTALL)
+        # Extract JSON from the LLM response, which might be wrapped in markdown
+        json_match = re.search(r"```json\\n(.*)```", llm_response, re.DOTALL)
         if json_match:
             json_str = json_match.group(1).strip()
         else:
             json_str = llm_response
 
-        entity_id_map_list = json.loads(json_str)
+        response_data = json.loads(json_str)
+        
         entity_id_map = {}
-        for item in entity_id_map_list:
-            canonical_id = item.get("canonical_id")
-            original_ids = item.get("original_ids")
-            if canonical_id and original_ids:
-                for entity_id in original_ids:
-                    entity_id_map[entity_id] = canonical_id
+        # The LLM returns a list of groups, each with a canonical ID and a list of original entities
+        for group in response_data.get("groups", []):
+            canonical_id = group.get("canonical_id")
+            if canonical_id:
+                for entity in group.get("entities", []):
+                    entity_id = entity.get("id")
+                    if entity_id:
+                        entity_id_map[entity_id] = canonical_id
     except (json.JSONDecodeError, AttributeError) as e:
         logging.error(f"Failed to decode JSON from LLM response: {llm_response}. Error: {e}")
         return data
@@ -306,7 +310,6 @@ def cluster_and_merge_entities(data):
     
     logging.info(f"Clustering complete. Result: {len(new_entities)} entities, {len(new_relationships)} relationships.")
     return data
-
 
 def load_to_memgraph(data):
     entities = data.get("entities", [])
