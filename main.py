@@ -141,36 +141,67 @@ def aggregate_results(data):
     }
 
 def generate_embeddings(data):
-    """Generates embeddings for all entities by calling the embedding service."""
+    """Generates embeddings for all entities by calling the embedding service with retry logic."""
     embedding_service_url = os.environ.get("EMBEDDING_SERVICE_URL")
     logging.info(f"Embedding service URL: {embedding_service_url}")
     if not embedding_service_url:
         logging.error("EMBEDDING_SERVICE_URL environment variable not set.")
-        # Decide how to handle this error: raise exception, return data as is, etc.
-        # For now, let's return the data without embeddings.
         return data
 
     entities = data.get("entities", [])
+    MAX_RETRIES = 10
+    INITIAL_BACKOFF_SECONDS = 1
+    MAX_BACKOFF_SECONDS = 600  # 10 minutes
+
     for entity in entities:
         text_to_embed = f"Type: {entity.get('type', '')}, Properties: {json.dumps(entity.get('properties', {}))}"
-        logging.info(f"Generating embedding for: {text_to_embed}")
-        try:
-            # Get the identity token
-            token_response = requests.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" + embedding_service_url, headers={"Metadata-Flavor": "Google"})
-            token = token_response.text
-            headers = {"Authorization": f"Bearer {token}"}
-            response = requests.post(embedding_service_url, json={"text": text_to_embed}, headers=headers)
-            logging.info(f"Embedding service response status: {response.status_code}")
-            logging.info(f"Embedding service response text: {response.text}")
-            response.raise_for_status()  # Raise an exception for bad status codes
-            embedding = response.json().get("embedding")
-            if embedding:
-                entity['embedding'] = embedding
-            else:
-                logging.warning(f"Embedding not found in response for entity: {entity.get('id')}")
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error calling embedding service for entity {entity.get('id')}: {e}")
-            # Decide how to handle this error, e.g., skip embedding for this entity
+        logging.info(f"Generating embedding for entity: {entity.get('id')}")
+        
+        # Initialize retry and backoff for each entity
+        retries = 0
+        backoff_seconds = INITIAL_BACKOFF_SECONDS
+        
+        while retries < MAX_RETRIES:
+            try:
+                # Get the identity token
+                token_response = requests.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" + embedding_service_url, headers={"Metadata-Flavor": "Google"})
+                token = token_response.text
+                headers = {"Authorization": f"Bearer {token}"}
+                
+                response = requests.post(embedding_service_url, json={"text": text_to_embed}, headers=headers)
+                
+                if response.status_code == 200:
+                    logging.info(f"Successfully received embedding for entity: {entity.get('id')}")
+                    embedding = response.json().get("embedding")
+                    if embedding:
+                        entity['embedding'] = embedding
+                    else:
+                        logging.warning(f"Embedding not found in response for entity: {entity.get('id')}")
+                    # Success, break the retry loop for this entity
+                    break
+                
+                elif response.status_code >= 500:
+                    logging.warning(f"Embedding service returned a server error ({response.status_code}). Retrying in {backoff_seconds} seconds...")
+                    time.sleep(backoff_seconds)
+                    retries += 1
+                    # Increase backoff for the next retry of the same entity
+                    backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
+                
+                else:
+                    # For other client-side errors, we don't retry
+                    logging.error(f"Embedding service returned a client error ({response.status_code}): {response.text}")
+                    response.raise_for_status()
+
+            except requests.exceptions.RequestException as e:
+                logging.error(f"Error calling embedding service for entity {entity.get('id')}: {e}")
+                time.sleep(backoff_seconds)
+                retries += 1
+                # Increase backoff for the next retry of the same entity
+                backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
+
+        if retries == MAX_RETRIES:
+            logging.error(f"Failed to get embedding for entity {entity.get('id')} after {MAX_RETRIES} retries.")
+
     return data
 
 def cluster_and_merge_entities(data):
