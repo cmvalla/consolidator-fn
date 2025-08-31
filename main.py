@@ -20,6 +20,8 @@ import psutil
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
 import requests
 
+EMBEDDING_DIMENSION = 384
+
 
 
 # --- Boilerplate and Configuration ---
@@ -213,8 +215,9 @@ def generate_embeddings(data):
                 # Increase backoff for the next retry of the same entity
                 backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
 
-        if retries == MAX_RETRIES:
-            logging.error(f"Failed to get embedding for entity {entity.get('id')} after {MAX_RETRIES} retries.")
+        if retries == MAX_RETRIES or not entity.get('embedding'):
+            logging.error(f"Failed to get embedding for entity {entity.get('id')} after {MAX_RETRIES} retries or embedding was empty. Entity details: {json.dumps(entity)}")
+            entity['embedding'] = [0.0] * EMBEDDING_DIMENSION
 
     return data
 
@@ -368,7 +371,7 @@ def migrate_to_spanner(data):
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
 
-    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding")) for e in entities]
+    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding", [0.0] * EMBEDDING_DIMENSION)) for e in entities]
     relationships_to_insert = [(r["source"], r["target"], r["type"], json.dumps(r.get("properties", {}))) for r in relationships if r.get('source') and r.get('target') and r['type'] != 'INSTANCE_OF']
     instance_of_to_insert = [(r["source"], r["target"]) for r in relationships if r.get('source') and r.get('target') and r['type'] == 'INSTANCE_OF']
 
