@@ -465,6 +465,7 @@ def migrate_to_spanner(data):
     BATCH_SIZE = 100
 
     for batch in chunk_list(entities_to_insert, BATCH_SIZE):
+        logging.info(f"Inserting/updating {len(batch)} entities. First entity: {batch[0] if batch else 'N/A'}")
         spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
             table="Entities",
             columns=("Eid", "Type", "Properties", "Embedding", "Communities"),
@@ -475,6 +476,7 @@ def migrate_to_spanner(data):
     communities_to_insert = [(c["id"], c["summary"], c["embedding"]) for c in data.get("communities", [])]
 
     for batch in chunk_list(communities_to_insert, BATCH_SIZE):
+        logging.info(f"Inserting/updating {len(batch)} communities. First community: {batch[0] if batch else 'N/A'}")
         spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
             table="Communities",
             columns=("CommunityId", "Summary", "Embedding"),
@@ -483,6 +485,7 @@ def migrate_to_spanner(data):
         logging.info(f"Inserted {len(batch)} communities.")
 
     for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
+        logging.info(f"Inserting/updating {len(batch)} relationships. First relationship: {batch[0] if batch else 'N/A'}")
         spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
             table="Relationships",
             columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
@@ -491,6 +494,7 @@ def migrate_to_spanner(data):
         logging.info(f"Inserted {len(batch)} relationships.")
 
     for batch in chunk_list(instance_of_to_insert, BATCH_SIZE):
+        logging.info(f"Inserting/updating {len(batch)} instance-of relationships. First instance-of: {batch[0] if batch else 'N/A'}")
         spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
             table="InstanceOf",
             columns=("InstanceEid", "ClassEid"),
