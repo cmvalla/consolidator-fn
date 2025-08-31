@@ -7,6 +7,7 @@ import google.cloud.logging
 import logging
 import redis
 import igraph as ig
+import hashlib
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -363,7 +364,7 @@ def migrate_to_spanner(data):
     relationships = data.get("relationships", [])
 
     entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding", [0.0] * EMBEDDING_DIMENSION), json.dumps(e.get("communities", []))) for e in entities]
-    relationships_to_insert = [(r["source"], r["target"], r["type"], json.dumps(r.get("properties", {}))) for r in relationships if r.get('source') and r.get('target') and r['type'] != 'INSTANCE_OF']
+    relationships_to_insert = [(hashlib.sha256(f"{r['source']}-{r['target']}-{r['type']}".encode()).hexdigest(), r["source"], r["target"], r["type"], json.dumps(r.get("properties", {}))) for r in relationships if r.get('source') and r.get('target') and r['type'] != 'INSTANCE_OF']
     instance_of_to_insert = [(r["source"], r["target"]) for r in relationships if r.get('source') and r.get('target') and r['type'] == 'INSTANCE_OF']
 
     def chunk_list(lst, n):
@@ -383,7 +384,7 @@ def migrate_to_spanner(data):
     for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
         spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
             table="Relationships",
-            columns=("SourceEid", "TargetEid", "Type", "Properties"),
+            columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
             values=batch,
         ))
         logging.info(f"Inserted {len(batch)} relationships.")
