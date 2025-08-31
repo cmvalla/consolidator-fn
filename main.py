@@ -454,9 +454,9 @@ def run_igraph_community_detection(data):
 
 def migrate_to_spanner(data):
     logging.info("Migrating data to Spanner...")
-    logging.info(f"Entities received by migrate_to_spanner: {data.get("entities", [])[:5]}") # Log first 5 entities
-    logging.info(f"Relationships received by migrate_to_spanner: {data.get("relationships", [])[:5]}") # Log first 5 relationships
-    logging.info(f"Communities received by migrate_to_spanner: {data.get("communities", [])[:5]}") # Log first 5 communities
+    logging.info(f"Entities received by migrate_to_spanner: {data.get('entities', [])[:5]}") # Log first 5 entities
+    logging.info(f"Relationships received by migrate_to_spanner: {data.get('relationships', [])[:5]}") # Log first 5 relationships
+    logging.info(f"Communities received by migrate_to_spanner: {data.get('communities', [])[:5]}") # Log first 5 communities
 
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
