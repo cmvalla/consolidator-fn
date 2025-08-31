@@ -7,6 +7,7 @@ import google.cloud.logging
 import logging
 import redis
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 from langchain_community.graphs import MemgraphGraph
 from langchain_google_vertexai import VertexAI
 from langchain.chains import LLMChain
@@ -217,9 +218,10 @@ def generate_embeddings(data):
 
     return data
 
-def cluster_and_merge_entities(data):
+def cluster_and_merge_entities(data, similarity_threshold=0.9):
     """
-    Clusters similar entities, creates Class and Instance nodes, promotes relationships, and aggregates their weights.
+    Clusters similar entities based on embedding similarity, creates Class and Instance nodes,
+    promotes relationships, and aggregates their weights.
     """
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
@@ -227,42 +229,43 @@ def cluster_and_merge_entities(data):
     if not entities:
         return data
 
-    prompt = PromptTemplate(
-        input_variables=["entities"],
-        template="""
-        From the following list of entities, identify entities that refer to the same real-world object and group them.
-        For each group, choose one canonical entity and provide a mapping from the old entity IDs to the new canonical entity ID.
-        Entities: {entities}
-        Mapping:
-        """
-    )
+    # Extract embeddings and entity IDs
+    entity_ids = [e["id"] for e in entities]
+    embeddings = np.array([e.get("embedding") for e in entities])
 
-    chain = LLMChain(llm=llm, prompt=prompt)
-    entity_list_str = json.dumps(entities, indent=2)
-    llm_response = chain.run(entities=entity_list_str)
-
-    try:
-        # Extract JSON from the LLM response, which might be wrapped in markdown
-        json_match = re.search(r"```json\\n(.*)```", llm_response, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1).strip()
-        else:
-            json_str = llm_response
-
-        response_data = json.loads(json_str)
-        
-        entity_id_map = {}
-        # The LLM returns a list of groups, each with a canonical ID and a list of original entities
-        for group in response_data.get("groups", []):
-            canonical_id = group.get("canonical_id")
-            if canonical_id:
-                for entity in group.get("entities", []):
-                    entity_id = entity.get("id")
-                    if entity_id:
-                        entity_id_map[entity_id] = canonical_id
-    except (json.JSONDecodeError, AttributeError) as e:
-        logging.error(f"Failed to decode JSON from LLM response: {llm_response}. Error: {e}")
+    # Filter out entities without embeddings
+    valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None]
+    if len(valid_indices) < 2:
+        logging.warning("Not enough entities with embeddings to perform clustering.")
         return data
+        
+    valid_embeddings = embeddings[valid_indices]
+    valid_entity_ids = [entity_ids[i] for i in valid_indices]
+
+    # Calculate cosine similarity matrix
+    similarity_matrix = cosine_similarity(valid_embeddings)
+
+    # Group entities based on similarity threshold
+    visited = [False] * len(valid_entity_ids)
+    clusters = []
+    for i in range(len(valid_entity_ids)):
+        if visited[i]:
+            continue
+        cluster = [i]
+        visited[i] = True
+        for j in range(i + 1, len(valid_entity_ids)):
+            if not visited[j] and similarity_matrix[i][j] > similarity_threshold:
+                cluster.append(j)
+                visited[j] = True
+        clusters.append(cluster)
+
+    # Create entity_id_map
+    entity_id_map = {}
+    for cluster in clusters:
+        canonical_index = cluster[0]
+        canonical_id = valid_entity_ids[canonical_index]
+        for entity_index in cluster:
+            entity_id_map[valid_entity_ids[entity_index]] = canonical_id
 
     # Create a map from old entity ids to new class ids
     class_id_map = {}
@@ -278,7 +281,7 @@ def cluster_and_merge_entities(data):
             "id": f"class_{canonical_id}",
             "type": "Class",
             "properties": {},
-            "embedding": []
+            "embedding": [] # We could average the embeddings of the instances
         }
         new_entities.append(class_entity)
 
