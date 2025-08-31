@@ -20,7 +20,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
         image = "${var.image_url}:${var.image_tag}"
         resources {
           limits = {
-            "memory": "1Gi",
+            "memory": "2Gi",
             "cpu": "1"
           }
         }
