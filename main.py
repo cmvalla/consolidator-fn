@@ -39,6 +39,16 @@ spanner_client = None
 spanner_instance = None
 spanner_database = None
 
+CLUSTER_SUMMARY_PROMPT = PromptTemplate.from_template(
+    "Summarize the following collection of entities into a single, coherent paragraph. "
+    "The summary should capture the main theme and characteristics of the cluster.\n\n"
+    "Entities:\n{cluster_text}\n\nSummary:"
+)
+
+SUMMARY_PROMPT = PromptTemplate.from_template(
+    "Summarize the following text in one concise sentence:\n\n"
+    "TEXT:\n---\n{text_chunk}\n---\n\nSummary:"
+)
 
 def ensure_spanner_graph_exists(database):
     """
@@ -141,18 +151,62 @@ def aggregate_results(data):
         "relationships": all_relationships
     }
 
-def generate_embeddings(data):
-    """Generates embeddings for all entities and chunks by calling the embedding service with retry logic."""
+def get_embedding(text: str, entity_id: str = "Unknown"):
+    """Generates an embedding for a given text, with retry logic."""
     embedding_service_url = os.environ.get("EMBEDDING_SERVICE_URL")
-    logging.info(f"Embedding service URL: {embedding_service_url}")
     if not embedding_service_url:
         logging.error("EMBEDDING_SERVICE_URL environment variable not set.")
-        return data
+        return [0.0] * EMBEDDING_DIMENSION
 
-    entities = data.get("entities", [])
     MAX_RETRIES = 10
     INITIAL_BACKOFF_SECONDS = 1
     MAX_BACKOFF_SECONDS = 600  # 10 minutes
+    
+    retries = 0
+    backoff_seconds = INITIAL_BACKOFF_SECONDS
+
+    while retries < MAX_RETRIES:
+        try:
+            token_response = requests.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" + embedding_service_url, headers={"Metadata-Flavor": "Google"})
+            token = token_response.text
+            headers = {"Authorization": f"Bearer {token}"}
+            
+            response = requests.post(embedding_service_url, json={"text": text}, headers=headers)
+            
+            if response.status_code == 200:
+                embedding = response.json().get("embedding")
+                if embedding:
+                    return embedding
+                else:
+                    logging.warning(f"Embedding not found in response for entity: {entity_id}")
+                    return [0.0] * EMBEDDING_DIMENSION
+            
+            elif response.status_code >= 500:
+                logging.warning(f"Embedding service returned a server error ({response.status_code}) for entity {entity_id}. Retrying in {backoff_seconds} seconds...")
+                time.sleep(backoff_seconds)
+                retries += 1
+                backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
+            
+            else:
+                logging.error(f"Embedding service returned a client error ({response.status_code}) for entity {entity_id}: {response.text}")
+                response.raise_for_status()
+                return [0.0] * EMBEDDING_DIMENSION
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error calling embedding service for entity {entity_id}: {e}")
+            time.sleep(backoff_seconds)
+            retries += 1
+            backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
+
+    logging.error(f"Failed to get embedding for entity {entity_id} after {MAX_RETRIES} retries.")
+    return [0.0] * EMBEDDING_DIMENSION
+
+def generate_embeddings(data):
+    """Generates embeddings for all entities and communities."""
+    entities = data.get("entities", [])
+    
+    # Create a summarization chain
+    summarization_chain = LLMChain(llm=llm, prompt=SUMMARY_PROMPT)
 
     for entity in entities:
         entity_type = entity.get('type', '')
@@ -160,6 +214,15 @@ def generate_embeddings(data):
         
         if entity_type == 'Chunk':
             text_to_embed = properties.get('summary', '')
+            if not text_to_embed:
+                logging.warning(f"Chunk {entity.get('id')} has an empty summary. Generating a new one.")
+                original_text = properties.get('original_text', '')
+                if original_text:
+                    summary = summarization_chain.run(text_chunk=original_text)
+                    properties['summary'] = summary
+                    text_to_embed = summary
+                else:
+                    logging.warning(f"Chunk {entity.get('id')} also has no original_text to generate a summary from.")
         elif entity_type == 'Community':
             text_to_embed = properties.get('summary', '')
         else:
@@ -167,55 +230,10 @@ def generate_embeddings(data):
 
         if not text_to_embed:
             logging.warning(f"Skipping embedding for entity {entity.get('id')} because there is no text to embed.")
+            entity['embedding'] = [0.0] * EMBEDDING_DIMENSION
             continue
 
-        logging.info(f"Generating embedding for entity: {entity.get('id')}")
-        
-        # Initialize retry and backoff for each entity
-        retries = 0
-        backoff_seconds = INITIAL_BACKOFF_SECONDS
-        
-        while retries < MAX_RETRIES:
-            try:
-                # Get the identity token
-                token_response = requests.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" + embedding_service_url, headers={"Metadata-Flavor": "Google"})
-                token = token_response.text
-                headers = {"Authorization": f"Bearer {token}"}
-                
-                response = requests.post(embedding_service_url, json={"text": text_to_embed}, headers=headers)
-                
-                if response.status_code == 200:
-                    logging.info(f"Successfully received embedding for entity: {entity.get('id')}")
-                    embedding = response.json().get("embedding")
-                    if embedding:
-                        entity['embedding'] = embedding
-                    else:
-                        logging.warning(f"Embedding not found in response for entity: {entity.get('id')}")
-                    # Success, break the retry loop for this entity
-                    break
-                
-                elif response.status_code >= 500:
-                    logging.warning(f"Embedding service returned a server error ({response.status_code}). Retrying in {backoff_seconds} seconds...")
-                    time.sleep(backoff_seconds)
-                    retries += 1
-                    # Increase backoff for the next retry of the same entity
-                    backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
-                
-                else:
-                    # For other client-side errors, we don't retry
-                    logging.error(f"Embedding service returned a client error ({response.status_code}): {response.text}")
-                    response.raise_for_status()
-
-            except requests.exceptions.RequestException as e:
-                logging.error(f"Error calling embedding service for entity {entity.get('id')}: {e}")
-                time.sleep(backoff_seconds)
-                retries += 1
-                # Increase backoff for the next retry of the same entity
-                backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
-
-        if retries == MAX_RETRIES or not entity.get('embedding'):
-            logging.error(f"Failed to get embedding for entity {entity.get('id')} after {MAX_RETRIES} retries or embedding was empty. Entity details: {json.dumps(entity)}")
-            entity['embedding'] = [0.0] * EMBEDDING_DIMENSION
+        entity['embedding'] = get_embedding(text_to_embed, entity.get('id'))
 
     communities = data.get("communities", [])
     for community in communities:
@@ -224,52 +242,10 @@ def generate_embeddings(data):
 
         if not text_to_embed:
             logging.warning(f"Skipping embedding for community {community_id} because there is no text to embed.")
-            community['embedding'] = [0.0] * EMBEDDING_DIMENSION # Assign zero vector if no text
-            continue
-
-        logging.info(f"Generating embedding for community: {community_id}")
-
-        retries = 0
-        backoff_seconds = INITIAL_BACKOFF_SECONDS
-
-        while retries < MAX_RETRIES:
-            try:
-                token_response = requests.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" + embedding_service_url, headers={"Metadata-Flavor": "Google"})
-                token = token_response.text
-                headers = {"Authorization": f"Bearer {token}"}
-
-                response = requests.post(embedding_service_url, json={"text": text_to_embed}, headers=headers)
-
-                if response.status_code == 200:
-                    logging.info(f"Successfully received embedding for community: {community_id}")
-                    embedding = response.json().get("embedding")
-                    if embedding:
-                        community['embedding'] = embedding
-                    else:
-                        logging.warning(f"Embedding not found in response for community: {community_id}")
-                        community['embedding'] = [0.0] * EMBEDDING_DIMENSION # Assign zero vector if not found
-                    break
-
-                elif response.status_code >= 500:
-                    logging.warning(f"Embedding service returned a server error ({response.status_code}). Retrying in {backoff_seconds} seconds...")
-                    time.sleep(backoff_seconds)
-                    retries += 1
-                    backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
-
-                else:
-                    logging.error(f"Embedding service returned a client error ({response.status_code}): {response.text}")
-                    community['embedding'] = [0.0] * EMBEDDING_DIMENSION # Assign zero vector on client error
-                    response.raise_for_status()
-
-            except requests.exceptions.RequestException as e:
-                logging.error(f"Error calling embedding service for community {community_id}: {e}")
-                time.sleep(backoff_seconds)
-                retries += 1
-                backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
-
-        if retries == MAX_RETRIES or not community.get('embedding'):
-            logging.error(f"Failed to get embedding for community {community_id} after {MAX_RETRIES} retries or embedding was empty. Community details: {json.dumps(community)}")
             community['embedding'] = [0.0] * EMBEDDING_DIMENSION
+            continue
+            
+        community['embedding'] = get_embedding(text_to_embed, community_id)
 
     return data
 
@@ -289,13 +265,16 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     embeddings = np.array([e.get("embedding") for e in entities])
 
     # Filter out entities without embeddings
-    valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None]
+    valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None and len(emb) > 0]
     if len(valid_indices) < 2:
         logging.warning("Not enough entities with embeddings to perform clustering.")
         return data
         
     valid_embeddings = embeddings[valid_indices]
     valid_entity_ids = [entity_ids[i] for i in valid_indices]
+    
+    # Create a map from valid_entity_ids to the full entity object
+    id_to_entity = {entity['id']: entity for entity in entities}
 
     # Calculate cosine similarity matrix
     similarity_matrix = cosine_similarity(valid_embeddings)
@@ -316,11 +295,39 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
 
     # Create entity_id_map
     entity_id_map = {}
+    cluster_embeddings = {}
+    
+    # Create a summarization chain
+    summarization_chain = LLMChain(llm=llm, prompt=CLUSTER_SUMMARY_PROMPT)
+
     for cluster in clusters:
         canonical_index = cluster[0]
         canonical_id = valid_entity_ids[canonical_index]
-        for entity_index in cluster:
-            entity_id_map[valid_entity_ids[entity_index]] = canonical_id
+        
+        cluster_member_ids = [valid_entity_ids[entity_index] for entity_index in cluster]
+        
+        # Generate a representative text for the cluster
+        cluster_text_parts = []
+        for member_id in cluster_member_ids:
+            member_entity = id_to_entity.get(member_id)
+            if member_entity:
+                entity_type = member_entity.get('type', '')
+                properties = member_entity.get('properties', {})
+                cluster_text_parts.append(f"Type: {entity_type}, Properties: {json.dumps(properties)}")
+        
+        cluster_text = " ".join(cluster_text_parts)
+        
+        # Summarize the cluster text and generate embedding
+        if cluster_text:
+            summary = summarization_chain.run(cluster_text=cluster_text)
+            embedding = get_embedding(summary, f"class_{canonical_id}")
+        else:
+            embedding = [0.0] * EMBEDDING_DIMENSION
+            
+        cluster_embeddings[canonical_id] = embedding
+
+        for entity_id in cluster_member_ids:
+            entity_id_map[entity_id] = canonical_id
 
     # Create a map from old entity ids to new class ids
     class_id_map = {}
@@ -331,12 +338,12 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     new_relationships = []
 
     # Create class nodes
-    for canonical_id in set(entity_id_map.values()):
+    for canonical_id, embedding in cluster_embeddings.items():
         class_entity = {
             "id": f"class_{canonical_id}",
             "type": "Class",
             "properties": {},
-            "embedding": [] # We could average the embeddings of the instances
+            "embedding": embedding
         }
         new_entities.append(class_entity)
 
@@ -437,13 +444,16 @@ def run_igraph_community_detection(data):
         # Concatenate entity texts to form a community summary
         full_community_summary = " ".join(entity_texts)
         
-        # Here, you would also calculate the embedding for the community summary
-        # For now, we'll leave embedding as empty or average later
+        # Generate embedding for the community summary
+        if full_community_summary:
+            embedding = get_embedding(full_community_summary, comm_id)
+        else:
+            embedding = [0.0] * EMBEDDING_DIMENSION
         
         new_communities.append({
             "id": comm_id,
             "summary": full_community_summary,
-            "embedding": [] # Placeholder, will be filled by embedding service or averaging
+            "embedding": embedding
         })
 
     # Add new_communities to the data object to be processed by migrate_to_spanner
