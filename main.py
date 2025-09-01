@@ -21,6 +21,7 @@ import google.cloud.spanner_v1 as spanner
 import psutil
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 EMBEDDING_DIMENSION = 384
 
@@ -47,7 +48,14 @@ CLUSTER_SUMMARY_PROMPT = PromptTemplate.from_template(
 
 SUMMARY_PROMPT = PromptTemplate.from_template(
     "Summarize the following text in one concise sentence:\n\n"
-    "TEXT:\n---\n{text_chunk}\n---\n\nSummary:"
+    "TEXT:\n---\n{text_chunk}\n---\n\nSummary:")
+
+CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate.from_template(
+    "You are a knowledge graph expert. Based on the following instances of a class, generate a concise and descriptive name and a short description for the class that captures the common theme of the instances.\n\n"
+    "Instances:\n{instances_text}\n\n"
+    "Respond with a single, valid JSON object with two keys: \"name\" and \"description\".\n"
+    "Example output:\n"
+    '{{\"name\": \"Programming Languages\", \"description\": \"A collection of programming languages used in software development.\"}}'
 )
 
 def ensure_spanner_graph_exists(database):
@@ -80,6 +88,7 @@ def initialize_clients():
         SPANNER_DATABASE_ID = os.environ.get("SPANNER_DATABASE_ID")
         logging.info(f"SPANNER_INSTANCE_ID from env: {SPANNER_INSTANCE_ID}")
         logging.info(f"SPANNER_DATABASE_ID from env: {SPANNER_DATABASE_ID}")
+        logging.info(f"GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
         LOCATION = os.environ.get("LOCATION")
         
         # --- Secret Manager ---
@@ -261,6 +270,10 @@ def generate_embeddings(data):
 
     return data
 
+def generate_class_properties(class_property_chain, instances_text):
+    """Helper function to run LLM chain in a thread."""
+    return class_property_chain.run(instances_text=instances_text)
+
 def cluster_and_merge_entities(data, similarity_threshold=0.9):
     """
     Clusters similar entities based on embedding similarity, creates Class and Instance nodes,
@@ -352,34 +365,47 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     # Create a new LLM chain for class property generation
     class_property_chain = LLMChain(llm=llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
 
-    # Create class nodes
-    for canonical_id, embedding in cluster_embeddings.items():
-        cluster_member_ids = [entity_id for entity_id, c_id in entity_id_map.items() if c_id == canonical_id]
-        
-        instances_text_parts = []
-        for member_id in cluster_member_ids:
-            member_entity = id_to_entity.get(member_id)
-            if member_entity:
-                properties = member_entity.get('properties', {})
-                instances_text_parts.append(f"- {json.dumps(properties)}")
-        
-        instances_text = "\n".join(instances_text_parts)
-        
-        # Generate class properties using the LLM
-        generated_properties_str = class_property_chain.run(instances_text=instances_text)
-        try:
-            generated_properties = json.loads(generated_properties_str)
-        except json.JSONDecodeError:
-            logging.warning(f"Failed to parse generated properties for class {canonical_id}: {generated_properties_str}")
-            generated_properties = {"name": f"Class {canonical_id}", "description": ""}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_canonical_id = {}
+        for canonical_id, embedding in cluster_embeddings.items():
+            cluster_member_ids = [entity_id for entity_id, c_id in entity_id_map.items() if c_id == canonical_id]
+            
+            instances_text_parts = []
+            for member_id in cluster_member_ids:
+                member_entity = id_to_entity.get(member_id)
+                if member_entity:
+                    properties = member_entity.get('properties', {})
+                    instances_text_parts.append(f"- {json.dumps(properties)}")
+            
+            instances_text = "\n".join(instances_text_parts)
+            
+            future = executor.submit(generate_class_properties, class_property_chain, instances_text)
+            future_to_canonical_id[future] = (canonical_id, embedding)
 
-        class_entity = {
-            "id": f"class_{canonical_id}",
-            "type": "Class",
-            "properties": generated_properties,
-            "embedding": embedding
-        }
-        new_entities.append(class_entity)
+        processed_clusters = 0
+        total_clusters = len(cluster_embeddings)
+        for future in as_completed(future_to_canonical_id):
+            canonical_id, embedding = future_to_canonical_id[future]
+            try:
+                generated_properties_str = future.result()
+                generated_properties = json.loads(generated_properties_str)
+            except Exception as exc:
+                logging.warning(f"Failed to generate properties for class {canonical_id}: {exc}")
+                generated_properties = {"name": f"Class {canonical_id}", "description": ""}
+
+            class_entity = {
+                "id": f"class_{canonical_id}",
+                "type": "Class",
+                "properties": generated_properties,
+                "embedding": embedding
+            }
+            new_entities.append(class_entity)
+            
+            processed_clusters += 1
+            progress = (processed_clusters / total_clusters) * 100
+            if processed_clusters % (total_clusters // 10 or 1) == 0:
+                logging.info(f"Class property generation progress: {progress:.0f}% ({processed_clusters}/{total_clusters})")
+
 
     # Create instance nodes and INSTANCE_OF relationships
     for entity in entities:
@@ -398,7 +424,7 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     # Update relationships
     for rel in relationships:
         source_class_id = class_id_map.get(rel.get("source"))
-        target_class_id = class_id_map.get(rel.get("target")),
+        target_class_id = class_id_map.get(rel.get("target"))
         if source_class_id and target_class_id:
             rel["source"] = source_class_id
             rel["target"] = target_class_id
