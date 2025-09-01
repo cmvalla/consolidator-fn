@@ -78,6 +78,8 @@ def initialize_clients():
         
         SPANNER_INSTANCE_ID = os.environ.get("SPANNER_INSTANCE_ID")
         SPANNER_DATABASE_ID = os.environ.get("SPANNER_DATABASE_ID")
+        logging.info(f"SPANNER_INSTANCE_ID from env: {SPANNER_INSTANCE_ID}")
+        logging.info(f"SPANNER_DATABASE_ID from env: {SPANNER_DATABASE_ID}")
         LOCATION = os.environ.get("LOCATION")
         
         # --- Secret Manager ---
@@ -106,6 +108,7 @@ def initialize_clients():
         spanner_client = spanner.Client(project=GCP_PROJECT)
         spanner_instance = spanner_client.instance(SPANNER_INSTANCE_ID)
         spanner_database = spanner_instance.database(SPANNER_DATABASE_ID)
+        logging.info(f"Spanner client configured for project: {spanner_client.project}, instance: {spanner_instance.instance_id}, database: {spanner_database.database_id}")
         logging.info("Spanner client initialized successfully.")
 
         
@@ -117,7 +120,8 @@ def initialize_clients():
 
 # --- LangChain Runnables ---
 def decode_pubsub_message(cloud_event):
-    message_data = base64.b64decode(cloud_event.data["message"]["data"]).decode("utf-8")
+    logging.info(f"Received cloud_event: {cloud_event}")
+    message_data = base64.b64decode(cloud_event["data"]["message"]["data"]).decode("utf-8")
     message_json = json.loads(message_data)
     return {"batch_id": message_json.get("batch_id")}
 
