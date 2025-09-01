@@ -380,6 +380,7 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
 
 
 
+
     return data
 
 def run_igraph_community_detection(data):
@@ -548,10 +549,40 @@ consolidation_chain = RunnableSequence(
 # --- Main Function ---
 @functions_framework.cloud_event
 def consolidator(cloud_event):
+    batch_id = None
     try:
         initialize_clients()
-        consolidation_chain.invoke(cloud_event)
+        
+        data = decode_pubsub_message(cloud_event)
+        batch_id = data.get("batch_id")
+
+        consolidation_chain.invoke(data)
+        
+        # If everything is successful, update the status to SUCCEEDED
+        if batch_id:
+            with spanner_database.batch() as batch:
+                batch.update(
+                    table="WorkflowStatus",
+                    columns=("BatchId", "Status", "UpdatedAt"),
+                    values=[(batch_id, "SUCCEEDED", spanner.COMMIT_TIMESTAMP)],
+                )
+            logging.info(f"Successfully updated workflow status for batch ID {batch_id} to SUCCEEDED.")
+
         return "OK", 200
     except Exception as e:
-        logging.error(f'An error occurred in the consolidator: {e}', exc_info=True)
+        logging.error(f'An error occurred in the consolidator for batch_id {batch_id}: {e}', exc_info=True)
+        
+        # If an error occurs, update the status to FAILED
+        if batch_id:
+            try:
+                with spanner_database.batch() as batch:
+                    batch.update(
+                        table="WorkflowStatus",
+                        columns=("BatchId", "Status", "UpdatedAt"),
+                        values=[(batch_id, "FAILED", spanner.COMMIT_TIMESTAMP)],
+                    )
+                logging.info(f"Successfully updated workflow status for batch ID {batch_id} to FAILED.")
+            except Exception as spanner_e:
+                logging.error(f"Could not update workflow status for batch ID {batch_id} to FAILED: {spanner_e}", exc_info=True)
+
         return "Internal Server Error", 500
