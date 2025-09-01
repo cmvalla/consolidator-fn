@@ -121,8 +121,12 @@ def initialize_clients():
 # --- LangChain Runnables ---
 def decode_pubsub_message(cloud_event):
     logging.info(f"Received cloud_event: {cloud_event}")
-    
-    # Handle both dict and CloudEvent objects
+
+    # Handle manual trigger for testing
+    if isinstance(cloud_event, dict) and "batch_id" in cloud_event and "message" not in cloud_event:
+        return {"batch_id": cloud_event["batch_id"]}
+
+    # Handle both dict and CloudEvent objects from Pub/Sub
     event_data = cloud_event.get("data") if isinstance(cloud_event, dict) else cloud_event.data
 
     message_data = base64.b64decode(event_data["message"]["data"]).decode("utf-8")
