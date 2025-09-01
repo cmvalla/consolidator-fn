@@ -349,12 +349,34 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     new_entities = []
     new_relationships = []
 
+    # Create a new LLM chain for class property generation
+    class_property_chain = LLMChain(llm=llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
+
     # Create class nodes
     for canonical_id, embedding in cluster_embeddings.items():
+        cluster_member_ids = [entity_id for entity_id, c_id in entity_id_map.items() if c_id == canonical_id]
+        
+        instances_text_parts = []
+        for member_id in cluster_member_ids:
+            member_entity = id_to_entity.get(member_id)
+            if member_entity:
+                properties = member_entity.get('properties', {})
+                instances_text_parts.append(f"- {json.dumps(properties)}")
+        
+        instances_text = "\n".join(instances_text_parts)
+        
+        # Generate class properties using the LLM
+        generated_properties_str = class_property_chain.run(instances_text=instances_text)
+        try:
+            generated_properties = json.loads(generated_properties_str)
+        except json.JSONDecodeError:
+            logging.warning(f"Failed to parse generated properties for class {canonical_id}: {generated_properties_str}")
+            generated_properties = {"name": f"Class {canonical_id}", "description": ""}
+
         class_entity = {
             "id": f"class_{canonical_id}",
             "type": "Class",
-            "properties": {},
+            "properties": generated_properties,
             "embedding": embedding
         }
         new_entities.append(class_entity)
@@ -376,7 +398,7 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     # Update relationships
     for rel in relationships:
         source_class_id = class_id_map.get(rel.get("source"))
-        target_class_id = class_id_map.get(rel.get("target"))
+        target_class_id = class_id_map.get(rel.get("target")),
         if source_class_id and target_class_id:
             rel["source"] = source_class_id
             rel["target"] = target_class_id
