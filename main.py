@@ -50,13 +50,23 @@ SUMMARY_PROMPT = PromptTemplate.from_template(
     "Summarize the following text in one concise sentence:\n\n"
     "TEXT:\n---\n{text_chunk}\n---\n\nSummary:")
 
+CLASS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string", "description": "A concise and descriptive name for the class."},
+        "description": {"type": "string", "description": "A paragraph that summarizes the common theme and purpose of the instances."},
+        "properties": {
+            "type": "object",
+            "description": "An object representing the common schema of the instances. Keys should reflect common properties, and values should be a representative value or type (e.g., 'string', 'integer', 'boolean')."
+        }
+    },
+    "required": ["name", "description", "properties"]
+}
+
 CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate.from_template(
     "You are a knowledge graph expert. You are tasked with creating a representative 'Class' entity from a collection of 'Instance' entities. "
-    "Based on the following instances, generate a JSON object for the 'Class' that includes: "
-    "1. A concise and descriptive 'name' for the class. "
-    "2. A 'description' that summarizes the common theme of the instances. "
-    "3. A 'properties' object that represents the common schema of the instances. For each key in the instances' properties, provide a representative value or type. "
-    "The structure of the generated JSON should be compatible with the instances provided.\n\n"
+    "Based on the following instances, generate a JSON object for the 'Class' that adheres to the following JSON schema:\n\n"
+    f"```json\n{json.dumps(CLASS_SCHEMA, indent=2)}\n```\n\n"
     "Instances (as JSON objects):\n{instances_text}\n\n"
     "Respond with a single, valid JSON object for the 'Class' entity."
 )
@@ -133,6 +143,36 @@ def initialize_clients():
         raise  # Re-raise the exception to halt execution if initialization fails
 
 # --- LangChain Runnables ---
+def extract_json_from_llm_response(text):
+    '''
+    Extracts a JSON object from the model's text response and performs basic validation.
+    Handles markdown code blocks.
+    '''
+    # Try to find a JSON block enclosed in ```json ... ```
+    match = re.search(r"```json\s*({.*})```", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        json_str = match.group(1).strip()
+    else:
+        # If not found, try to find a JSON block enclosed in ``` ... ``` (without 'json')
+        match = re.search(r"```\s*({.*})```", text, re.DOTALL | re.IGNORECASE)
+        if match:
+            json_str = match.group(1).strip()
+        else:
+            # Fallback: assume the entire text is JSON, but strip common wrappers
+            json_str = text.strip()
+            # Remove common prefixes/suffixes that are not valid JSON
+            if json_str.startswith("json"):
+                json_str = json_str[4:].strip()
+            if json_str.startswith("```"):
+                json_str = json_str[3:].strip()
+            if json_str.endswith("```"):
+                json_str = json_str[:-3].strip()
+
+    # Remove "insensitive:true" from the string (if present from previous LLM issues)
+    json_str = json_str.replace("insensitive:true", "")
+
+    return json_str
+
 def decode_pubsub_message(cloud_event):
     logging.info(f"Received cloud_event: {cloud_event}")
 
@@ -193,7 +233,7 @@ def get_embedding(text: str, entity_id: str = "Unknown"):
 
     while retries < MAX_RETRIES:
         try:
-            token_response = requests.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" + embedding_service_url, headers={"Metadata-Flavor": "Google"})
+            token_response = requests.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email", headers={"Metadata-Flavor": "Google"})
             token = token_response.text
             headers = {"Authorization": f"Bearer {token}"}
             
@@ -384,7 +424,8 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
             canonical_id, embedding = future_to_canonical_id[future]
             try:
                 generated_properties_str = future.result()
-                generated_properties = json.loads(generated_properties_str)
+                extracted_json_str = extract_json_from_llm_response(generated_properties_str)
+                generated_properties = json.loads(extracted_json_str)
             except Exception as exc:
                 logging.warning(f"Failed to generate properties for class {canonical_id}: {exc}")
                 generated_properties = {"name": f"Class {canonical_id}", "description": ""}
@@ -566,6 +607,8 @@ def migrate_to_spanner(data):
 
     # for batch in chunk_list(instance_of_to_insert, BATCH_SIZE):
     #     sample_batch = batch[:5] if len(batch) > 5 else batch
+    #     logging.info(f"Inserting/updating InstanceOf table. Sample batch ({len(batch)} items): {sample_batch}")
+    #     instance_class_eids_in_batch = [(item[0], item[1]) for item in batch] # (InstanceEid, ClassEid) are the first two elements
     #     logging.info(f"Inserting/updating InstanceOf table. Sample batch ({len(batch)} items): {sample_batch}")
     #     instance_class_eids_in_batch = [(item[0], item[1]) for item in batch] # (InstanceEid, ClassEid) are the first two elements
     #     logging.info(f"InstanceOf InstanceEid, ClassEid in batch: {instance_class_eids_in_batch}")
