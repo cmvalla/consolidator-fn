@@ -51,11 +51,14 @@ SUMMARY_PROMPT = PromptTemplate.from_template(
     "TEXT:\n---\n{text_chunk}\n---\n\nSummary:")
 
 CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate.from_template(
-    "You are a knowledge graph expert. Based on the following instances of a class, generate a concise and descriptive name and a short description for the class that captures the common theme of the instances.\n\n"
-    "Instances:\n{instances_text}\n\n"
-    "Respond with a single, valid JSON object with two keys: \"name\" and \"description\".\n"
-    "Example output:\n"
-    '{{\"name\": \"Programming Languages\", \"description\": \"A collection of programming languages used in software development.\"}}'
+    "You are a knowledge graph expert. You are tasked with creating a representative 'Class' entity from a collection of 'Instance' entities. "
+    "Based on the following instances, generate a JSON object for the 'Class' that includes: "
+    "1. A concise and descriptive 'name' for the class. "
+    "2. A 'description' that summarizes the common theme of the instances. "
+    "3. A 'properties' object that represents the common schema of the instances. For each key in the instances' properties, provide a representative value or type. "
+    "The structure of the generated JSON should be compatible with the instances provided.\n\n"
+    "Instances (as JSON objects):\n{instances_text}\n\n"
+    "Respond with a single, valid JSON object for the 'Class' entity."
 )
 
 def ensure_spanner_graph_exists(database):
@@ -67,7 +70,9 @@ def ensure_spanner_graph_exists(database):
     pass
 
 def initialize_clients():
-    """Initializes all external clients."""
+    """
+    Initializes all external clients.
+    """
     global redis_client, llm, spanner_client, spanner_instance, spanner_database, embedding_model
 
     try:
@@ -110,7 +115,7 @@ def initialize_clients():
         
 
         logging.info("Initializing Vertex AI...")
-        llm = VertexAI(model_name="gemini-2.5-flash", location=LOCATION)
+        llm = VertexAI(model_name="gemini-2.5-flash", location=LOCATION, model_kwargs={"response_mime_type": "application/json"})
         logging.info("Vertex AI clients initialized successfully.")
 
         logging.info("Initializing Spanner client...")
@@ -256,23 +261,14 @@ def generate_embeddings(data):
 
         entity['embedding'] = get_embedding(text_to_embed, entity.get('id'))
 
-    communities = data.get("communities", [])
-    for community in communities:
-        text_to_embed = community.get("summary", "")
-        community_id = community.get("id", "")
-
-        if not text_to_embed:
-            logging.warning(f"Skipping embedding for community {community_id} because there is no text to embed.")
-            community['embedding'] = [0.0] * EMBEDDING_DIMENSION
-            continue
-            
-        community['embedding'] = get_embedding(text_to_embed, community_id)
-
     return data
 
 def generate_class_properties(class_property_chain, instances_text):
-    """Helper function to run LLM chain in a thread."""
-    return class_property_chain.run(instances_text=instances_text)
+    """Helper function to run LLM chain in a thread, with logging."""
+    logging.info(f"Querying LLM for class properties with the following instances:\n{instances_text}")
+    response = class_property_chain.run(instances_text=instances_text)
+    logging.info(f"LLM response for class properties: {response}")
+    return response
 
 def cluster_and_merge_entities(data, similarity_threshold=0.9):
     """
@@ -417,7 +413,8 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
             instance_of_rel = {
                 "source": entity["id"],
                 "target": class_id,
-                "type": "INSTANCE_OF"
+                "type": "INSTANCE_OF",
+                "properties": {"description": "Indicates that an entity is an instance of a specific class."}
             }
             new_relationships.append(instance_of_rel)
 
@@ -498,9 +495,7 @@ def run_igraph_community_detection(data):
                     community_summaries[community_id] = []
                 community_summaries[community_id].append(entity_text_for_summary)
 
-    # Now, create a list of community entities to be inserted into Spanner
-    # This assumes a "Communities" table in Spanner
-    new_communities = []
+    # Create standard "Community" entities and add them to the main entities list
     for comm_id, entity_texts in community_summaries.items():
         # Concatenate entity texts to form a community summary
         full_community_summary = " ".join(entity_texts)
@@ -511,23 +506,25 @@ def run_igraph_community_detection(data):
         else:
             embedding = [0.0] * EMBEDDING_DIMENSION
         
-        new_communities.append({
+        community_entity = {
             "id": comm_id,
-            "summary": full_community_summary,
-            "embedding": embedding
-        })
+            "type": "Community",
+            "properties": {
+                "summary": full_community_summary,
+                "community_type": "structural"
+            },
+            "embedding": embedding,
+            "communities": [] # Structural communities are not part of other communities
+        }
+        entities.append(community_entity)
 
-    # Add new_communities to the data object to be processed by migrate_to_spanner
-    data["communities"] = new_communities
-
-    logging.info(f"Found {len(cliques)} cliques (overlapping communities) and generated summaries.")
+    logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(community_summaries)} standard Community entities.")
     return data
 
 def migrate_to_spanner(data):
     logging.info("Migrating data to Spanner...")
     logging.info(f"Entities received by migrate_to_spanner: {data.get('entities', [])[:5]}") # Log first 5 entities
     logging.info(f"Relationships received by migrate_to_spanner: {data.get('relationships', [])[:5]}") # Log first 5 relationships
-    logging.info(f"Communities received by migrate_to_spanner: {data.get('communities', [])[:5]}") # Log first 5 communities
 
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
@@ -554,20 +551,6 @@ def migrate_to_spanner(data):
             values=batch,
         ))
         logging.info(f"Inserted {len(batch)} entities.")
-
-    # communities_to_insert = [(c["id"], c["summary"], c["embedding"]) for c in data.get("communities", [])]
-
-    # for batch in chunk_list(communities_to_insert, BATCH_SIZE):
-    #     sample_batch = batch[:5] if len(batch) > 5 else batch
-    #     logging.info(f"Inserting/updating Communities table. Sample batch ({len(batch)} items): {sample_batch}")
-    #     community_ids_in_batch = [item[0] for item in batch] # CommunityId is the first element
-    #     logging.info(f"Communities CommunityIds in batch: {community_ids_in_batch}")
-    #     spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-    #         table="Communities",
-    #         columns=("CommunityId", "Summary", "Embedding"),
-    #         values=batch,
-    #     ))
-    #     logging.info(f"Inserted {len(batch)} communities.")
 
     # for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
     #     sample_batch = batch[:5] if len(batch) > 5 else batch
