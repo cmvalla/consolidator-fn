@@ -415,14 +415,20 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
                 "cluster_text": " ".join(cluster_text_parts)
             }
 
+        processed_clusters = 0
+        total_clusters = len(clusters)
         for future in as_completed(future_to_cluster):
             cluster_info = future_to_cluster[future]
             cluster_member_ids = cluster_info["member_ids"]
+            processed_clusters += 1
             try:
                 generated_properties_str = future.result()
                 extracted_json_str = extract_json_from_llm_response(generated_properties_str)
                 generated_properties = json.loads(extracted_json_str)
                 class_name = generated_properties.get("name")
+                if not class_name or not class_name.strip():
+                    logging.warning(f"Skipping class creation for cluster due to empty class name. Cluster info: {cluster_info}")
+                    continue
                 class_eid = generate_class_eid(class_name)
 
                 if not class_eid:
@@ -450,6 +456,10 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
 
             except Exception as e:
                 logging.error(f"Failed to process future for cluster: {e}", exc_info=True)
+            
+            if total_clusters > 0 and processed_clusters % (total_clusters // 10 or 1) == 0:
+                progress = (processed_clusters / total_clusters) * 100
+                logging.info(f"Class property generation progress: {progress:.0f}% ({processed_clusters}/{total_clusters})")
 
 
     new_entities = list(name_to_class_entity.values())

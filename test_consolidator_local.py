@@ -8,25 +8,25 @@ import main
 # --- Test Configuration ---
 CREDENTIALS_FILE = os.path.join(os.path.dirname(__file__), "credentials.json")
 
-@pytest.fixture(scope="module", autouse=True)
-def set_google_credentials():
-    """Fixture to set the GOOGLE_APPLICATION_CREDENTIALS environment variable."""
-    if not os.path.exists(CREDENTIALS_FILE):
-        pytest.fail(
-            f"Service account key file not found at '{CREDENTIALS_FILE}'. "
-            "Please create the file as per the instructions."
-        )
-    
-    original_value = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_FILE
-    
-    yield
-    
-    # Teardown: Restore original environment variable
-    if original_value is None:
-        del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
-    else:
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = original_value
+# @pytest.fixture(scope="module", autouse=True)
+# def set_google_credentials():
+#     """Fixture to set the GOOGLE_APPLICATION_CREDENTIALS environment variable."""
+#     if not os.path.exists(CREDENTIALS_FILE):
+#         pytest.fail(
+#             f"Service account key file not found at '{CREDENTIALS_FILE}'. "
+#             "Please create the file as per the instructions."
+#         )
+#     
+#     original_value = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+#     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_FILE
+#     
+#     yield
+#     
+#     # Teardown: Restore original environment variable
+#     if original_value is None:
+#         del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+#     else:
+#         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = original_value
 
 @patch("main.initialize_clients")
 @patch("main.redis.Redis")
@@ -125,6 +125,47 @@ def test_consolidator_local_integration(MockLLMChain, MockMemgraph, MockVertexAI
             {'source': '1', 'target': '3', 'type': 'FOUNDED', 'properties': None}
         ]}
     )
+
+@patch("main.spanner.Client")
+def test_migrate_to_spanner_filters_invalid_ids(MockSpannerClient):
+    """
+    Tests that migrate_to_spanner correctly filters out entities with null or empty string IDs.
+    """
+    # --- Mock the Spanner client and transaction ---
+    mock_transaction = MagicMock()
+    mock_database = MagicMock()
+    mock_database.run_in_transaction.side_effect = lambda func: func(mock_transaction)
+    main.spanner_database = mock_database
+
+    # --- Prepare test data with invalid entities ---
+    test_data = {
+        "entities": [
+            {"id": "valid_id_1", "type": "Person", "properties": {"name": "Valid Person"}},
+            {"id": None, "type": "Person", "properties": {"name": "Null ID Person"}},
+            {"id": "", "type": "Organization", "properties": {"name": "Empty String ID Org"}},
+            {"id": "  ", "type": "Product", "properties": {"name": "Whitespace ID Product"}},
+            {"id": "valid_id_2", "type": "Event", "properties": {"name": "Valid Event"}},
+        ],
+        "relationships": []
+    }
+
+    # --- Call the function under test ---
+    main.migrate_to_spanner(test_data)
+
+    # --- Assertions ---
+    # Check that run_in_transaction was called
+    mock_database.run_in_transaction.assert_called()
+
+    # Capture the arguments passed to insert_or_update
+    call_args, call_kwargs = mock_transaction.insert_or_update.call_args
+    
+    # Check the 'values' passed to the transaction
+    inserted_values = call_kwargs['values']
+    
+    # Assert that only the valid entities are present
+    assert len(inserted_values) == 2
+    inserted_ids = {item[0] for item in inserted_values}
+    assert inserted_ids == {"valid_id_1", "valid_id_2"}
 
 if __name__ == "__main__":
     pytest.main([__file__])
