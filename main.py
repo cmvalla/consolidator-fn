@@ -9,6 +9,7 @@ import redis
 import igraph as ig
 import hashlib
 import numpy as np
+import uuid
 from sklearn.metrics.pairwise import cosine_similarity
 
 from langchain_google_vertexai import VertexAI
@@ -63,14 +64,26 @@ CLASS_SCHEMA = {
 }
 
 CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate(
-    template="You are a knowledge graph expert. You are tasked with creating a representative 'Class' entity from a collection of 'Instance' entities. "
-    "Based on the following instances, and the source text they were extracted from, generate a JSON object for the 'Class' that adheres to the following JSON schema:\n\n"
+    template="You are a knowledge graph expert. Your task is to define a 'Class' that represents a collection of similar 'Instance' entities. "
+    "The goal is to find the most specific, meaningful classification for the instances based *only* on the provided context. "
+    "- **Specificity is key:** Do not generalize to high-level categories like 'Fairy Tale Character' if a more specific class like 'Wolf' or 'Antagonist' is appropriate within the source text. "
+    "- **Use the context:** The 'Class' name and description should be grounded in the 'Instances' and the 'Source Text' provided. "
+    "- **Create a Schema:** Generate a JSON object for the 'Class' that adheres to the following JSON schema:\n\n"
     "```json\n{schema}\n```\n\n"
     "Instances (as JSON objects):\n{instances_text}\n\n"
     "Source Text (for context):\n{source_text}\n\n"
     "Respond with a single, valid JSON object for the 'Class' entity.",
     input_variables=["instances_text", "schema", "source_text"]
 )
+
+def slugify(text):
+    """Creates a simple, clean ID from a string."""
+    if not text:
+        return None
+    # Remove special characters
+    text = re.sub(r'[^\w\s-]', '', text.lower())
+    # Replace whitespace and hyphens with a single underscore
+    return re.sub(r'[-\s]+', '_', text).strip('_')
 
 def ensure_spanner_graph_exists(database):
     """
@@ -316,8 +329,8 @@ def generate_class_properties(class_property_chain, instances_text, schema, sour
 
 def cluster_and_merge_entities(data, similarity_threshold=0.9):
     """
-    Clusters similar entities based on embedding similarity, creates Class and Instance nodes,
-    promotes relationships, and aggregates their weights.
+    Clusters similar entities, creates Class nodes with name-based IDs, and merges
+    classes with the same name by re-linking their instances.
     """
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
@@ -325,11 +338,8 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     if not entities:
         return data
 
-    # --- Start of new logic ---
-    # 1. Create a map from entity ID to the entity object for quick lookups.
     id_to_entity = {entity['id']: entity for entity in entities}
 
-    # 2. Create a map from an entity ID to its source chunk's text.
     entity_id_to_source_text = {}
     for rel in relationships:
         if rel.get("type") == "ARE_PART_OF_CHUNK":
@@ -341,13 +351,11 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
                     original_text = chunk_entity.get("properties", {}).get("original_text")
                     if original_text:
                         entity_id_to_source_text[entity_id] = original_text
-    # --- End of new logic ---
 
-    # Extract embeddings and entity IDs, excluding Chunk and Community entities
-    entity_ids = [e["id"] for e in entities if e.get("type") not in ["Chunk", "Community"]]
-    embeddings = np.array([e.get("embedding") for e in entities if e.get("type") not in ["Chunk", "Community"]])
+    clusterable_entities = [e for e in entities if e.get("type") not in ["Chunk", "Community"]]
+    entity_ids = [e["id"] for e in clusterable_entities]
+    embeddings = np.array([e.get("embedding") for e in clusterable_entities])
 
-    # Filter out entities without embeddings
     valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None and len(emb) > 0]
     if len(valid_indices) < 2:
         logging.warning("Not enough entities with embeddings to perform clustering.")
@@ -356,155 +364,112 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     valid_embeddings = embeddings[valid_indices]
     valid_entity_ids = [entity_ids[i] for i in valid_indices]
     
-    # Calculate cosine similarity matrix
     similarity_matrix = cosine_similarity(valid_embeddings)
 
-    # Group entities based on similarity threshold
     visited = [False] * len(valid_entity_ids)
     clusters = []
     for i in range(len(valid_entity_ids)):
         if visited[i]:
             continue
-        cluster = [i]
+        cluster = [valid_entity_ids[i]]
         visited[i] = True
         for j in range(i + 1, len(valid_entity_ids)):
             if not visited[j] and similarity_matrix[i][j] > similarity_threshold:
-                cluster.append(j)
+                cluster.append(valid_entity_ids[j])
                 visited[j] = True
         clusters.append(cluster)
 
-    # Create entity_id_map
-    entity_id_map = {}
-    cluster_embeddings = {}
-    
-    # Create a summarization chain
+    class_property_chain = LLMChain(llm=llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
     summarization_chain = LLMChain(llm=llm, prompt=CLUSTER_SUMMARY_PROMPT)
 
-    for cluster in clusters:
-        canonical_index = cluster[0]
-        canonical_id = valid_entity_ids[canonical_index]
-        
-        cluster_member_ids = [valid_entity_ids[entity_index] for entity_index in cluster]
-        
-        # Generate a representative text for the cluster
+    name_to_class_entity = {}
+    class_id_map = {}
+
+    for cluster_member_ids in clusters:
+        instances_text_parts = []
+        source_text_parts = set() # Use a set to store unique source texts
         cluster_text_parts = []
+
         for member_id in cluster_member_ids:
             member_entity = id_to_entity.get(member_id)
             if member_entity:
-                entity_type = member_entity.get('type', '')
                 properties = member_entity.get('properties', {})
+                instances_text_parts.append(f"- {json.dumps(properties)}")
+                source_text = entity_id_to_source_text.get(member_id)
+                if source_text:
+                    source_text_parts.add(source_text)
+                
+                entity_type = member_entity.get('type', '')
                 cluster_text_parts.append(f"Type: {entity_type}, Properties: {json.dumps(properties)}")
-        
-        cluster_text = " ".join(cluster_text_parts)
-        
-        # Summarize the cluster text and generate embedding
-        if cluster_text:
-            summary = summarization_chain.invoke({"cluster_text": cluster_text}).get("text")
-            embedding = get_embedding(summary, f"class_{canonical_id}")
-        else:
-            embedding = [0.0] * EMBEDDING_DIMENSION
-            
-        cluster_embeddings[canonical_id] = embedding
 
-        for entity_id in cluster_member_ids:
-            entity_id_map[entity_id] = canonical_id
+        instances_text = "\n".join(instances_text_parts)
+        source_text_context = "\n\n---\n\n".join(source_text_parts)
+        schema_str = json.dumps(CLASS_SCHEMA, indent=2)
 
-    # Create a map from old entity ids to new class ids
-    class_id_map = {}
-    for entity_id, canonical_id in entity_id_map.items():
-        class_id_map[entity_id] = f"class_{canonical_id}"
+        try:
+            generated_properties_str = generate_class_properties(class_property_chain, instances_text, schema_str, source_text_context)
+            extracted_json_str = extract_json_from_llm_response(generated_properties_str)
+            generated_properties = json.loads(extracted_json_str)
+            class_name = generated_properties.get("name")
+            class_eid = slugify(class_name)
 
-    new_entities = []
+            if not class_eid:
+                logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
+                continue
+
+            if class_name in name_to_class_entity:
+                # Merge with existing class
+                existing_class_eid = name_to_class_entity[class_name]["id"]
+                for member_id in cluster_member_ids:
+                    class_id_map[member_id] = existing_class_eid
+                logging.info(f"Merged cluster into existing class '{class_name}' (ID: {existing_class_eid})")
+            else:
+                # Create new class
+                cluster_text = " ".join(cluster_text_parts)
+                summary = summarization_chain.invoke({"cluster_text": cluster_text}).get("text")
+                embedding = get_embedding(summary, class_eid)
+
+                class_entity = {
+                    "id": class_eid,
+                    "type": "Class",
+                    "properties": generated_properties,
+                    "embedding": embedding
+                }
+                name_to_class_entity[class_name] = class_entity
+                for member_id in cluster_member_ids:
+                    class_id_map[member_id] = class_eid
+                logging.info(f"Created new class '{class_name}' (ID: {class_eid})")
+
+        except Exception as e:
+            logging.error(f"Failed to process cluster: {e}", exc_info=True)
+
+    new_entities = list(name_to_class_entity.values())
     new_relationships = []
 
-    # Create a new LLM chain for class property generation
-    class_property_chain = LLMChain(llm=llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
-
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_canonical_id = {}
-        for canonical_id, embedding in cluster_embeddings.items():
-            cluster_member_ids = [entity_id for entity_id, c_id in entity_id_map.items() if c_id == canonical_id]
-            
-            instances_text_parts = []
-            source_text_parts = set() # Use a set to store unique source texts
-            for member_id in cluster_member_ids:
-                member_entity = id_to_entity.get(member_id)
-                if member_entity:
-                    properties = member_entity.get('properties', {})
-                    instances_text_parts.append(f"- {json.dumps(properties)}")
-                    # Use the pre-built map to find the source text
-                    source_text = entity_id_to_source_text.get(member_id)
-                    if source_text:
-                        source_text_parts.add(source_text)
-            
-            instances_text = "\n".join(instances_text_parts)
-            source_text_context = "\n\n---\n\n".join(source_text_parts)
-            
-            schema_str = json.dumps(CLASS_SCHEMA, indent=2)
-            future = executor.submit(generate_class_properties, class_property_chain, instances_text, schema_str, source_text_context)
-            future_to_canonical_id[future] = (canonical_id, embedding)
-
-        processed_clusters = 0
-        total_clusters = len(cluster_embeddings)
-        for future in as_completed(future_to_canonical_id):
-            canonical_id, embedding = future_to_canonical_id[future]
-            try:
-                generated_properties_str = future.result()
-                extracted_json_str = extract_json_from_llm_response(generated_properties_str)
-                generated_properties = json.loads(extracted_json_str)
-            except Exception as exc:
-                logging.warning(f"Failed to generate properties for class {canonical_id}: {exc}")
-                generated_properties = {"name": f"Class {canonical_id}", "description": ""}
-
-            class_entity = {
-                "id": f"class_{canonical_id}",
-                "type": "Class",
-                "properties": generated_properties,
-                "embedding": embedding
-            }
-            new_entities.append(class_entity)
-            
-            processed_clusters += 1
-            progress = (processed_clusters / total_clusters) * 100
-            if processed_clusters % (total_clusters // 10 or 1) == 0:
-                logging.info(f"Class property generation progress: {progress:.0f}% ({processed_clusters}/{total_clusters})")
-
-
-    # Create instance nodes and INSTANCE_OF relationships
     for entity in entities:
-        # Keep original entities, but mark them as instances
         if entity.get("type") not in ["Chunk", "Community"]:
             entity["type"] = "Instance"
         new_entities.append(entity)
         
         class_id = class_id_map.get(entity["id"])
         if class_id:
-            instance_of_rel = {
+            new_relationships.append({
                 "source": entity["id"],
                 "target": class_id,
                 "type": "INSTANCE_OF",
                 "properties": {"description": "Indicates that an entity is an instance of a specific class."}
-            }
-            new_relationships.append(instance_of_rel)
+            })
 
-    # Update relationships to point to class nodes
     for rel in relationships:
         source_class_id = class_id_map.get(rel.get("source"))
-        target_class_id = class_id_map.get(rel.get("target"))
-        
-        # Promote relationship to class level if both source and target are in the same cluster
-        if source_class_id and target_class_id and source_class_id == target_class_id:
-            # This is an internal relationship within a class, we can either drop it or handle it.
-            # For now, we drop it to avoid self-loops on the class node.
-            continue
-        elif source_class_id and target_class_id:
-            # This is a relationship between two different classes
-            rel["source"] = source_class_id
-            rel["target"] = target_class_id
-            new_relationships.append(rel)
-        # Keep original relationships between instances if they are not promoted
-        # else:
-        #     new_relationships.append(rel)
+        target_class_id = class_id_map.get(rel.get("target") )
+        if source_class_id and target_class_id and source_class_id != target_class_id:
+            new_relationships.append({
+                "source": source_class_id,
+                "target": target_class_id,
+                "type": rel.get("type"),
+                "properties": rel.get("properties", {})
+            })
 
     data["entities"] = new_entities
     data["relationships"] = new_relationships
@@ -512,6 +477,80 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     logging.info(f"Clustering complete. Result: {len(new_entities)} entities, {len(new_relationships)} relationships.")
     return data
 
+def deduplicate_entities(data):
+    """Finds and resolves duplicate Eids before community detection."""
+    logging.info("Starting entity de-duplication process...")
+    entities = data.get("entities", [])
+    relationships = data.get("relationships", [])
+    id_to_entity = {e["id"]: e for e in entities}
+
+    eid_groups = {}
+    for entity in entities:
+        eid = entity["id"]
+        if eid not in eid_groups:
+            eid_groups[eid] = []
+        eid_groups[eid].append(entity)
+
+    final_entities = {}
+    eids_to_remap = {}
+
+    for eid, group in eid_groups.items():
+        if len(group) == 1:
+            final_entities[eid] = group[0]
+            continue
+
+        logging.warning(f"Found duplicate EID: '{eid}' for {len(group)} entities.")
+
+        # Case 1: Duplicate Classes
+        if all(e.get("type") == "Class" for e in group):
+            logging.info(f"Handling duplicate Class EID: {eid}")
+            # Count instances for each class
+            instance_counts = {e["id"]: 0 for e in group}
+            for rel in relationships:
+                if rel.get("type") == "INSTANCE_OF" and rel.get("target") in instance_counts:
+                    instance_counts[rel.get("target")] += 1
+            
+            # Sort classes by instance count, descending
+            sorted_classes = sorted(group, key=lambda e: instance_counts[e["id"]], reverse=True)
+            winner = sorted_classes[0]
+            losers = sorted_classes[1:]
+            final_entities[winner["id"]] = winner
+
+            for loser in losers:
+                eids_to_remap[loser["id"]] = winner["id"]
+                logging.info(f"Merging class '{loser['id']}' into '{winner['id']}'.")
+
+        # Case 2: Duplicate Instances
+        elif all(e.get("type") == "Instance" for e in group):
+            logging.info(f"Handling duplicate Instance EID: {eid}")
+            # Keep the first one, rename the others
+            final_entities[eid] = group[0]
+            for i, duplicate in enumerate(group[1:]):
+                original_id = duplicate["id"]
+                while True:
+                    new_eid = f"{original_id}_{uuid.uuid4().hex[:6]}"
+                    if new_eid not in id_to_entity and new_eid not in final_entities:
+                        break
+                
+                eids_to_remap[original_id] = new_eid
+                duplicate["id"] = new_eid
+                final_entities[new_eid] = duplicate
+                logging.info(f"Renamed duplicate instance '{original_id}' to '{new_eid}'.")
+        else:
+            logging.warning(f"Unhandled duplicate EID case for eid '{eid}'. Keeping all entities.")
+            for entity in group:
+                final_entities[entity["id"]] = entity
+
+    # Remap relationships
+    for rel in relationships:
+        if rel["source"] in eids_to_remap:
+            rel["source"] = eids_to_remap[rel["source"]]
+        if rel["target"] in eids_to_remap:
+            rel["target"] = eids_to_remap[rel["target"]]
+
+    data["entities"] = list(final_entities.values())
+    logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities.")
+    return data
 
 def run_igraph_community_detection(data):
     logging.info("Running igraph community detection...")
@@ -559,7 +598,7 @@ def run_igraph_community_detection(data):
         entity_text_for_summary = ", ".join(entity_summary_parts) if entity_summary_parts else entity_id
 
         for i, clique in enumerate(cliques):
-            if id_to_vertex[entity_id] in clique:
+            if id_to_vertex.get(entity_id) is not None and id_to_vertex[entity_id] in clique:
                 community_id = f"clique_{i}"
                 entity["communities"].append(community_id)
                 
@@ -603,7 +642,7 @@ def migrate_to_spanner(data):
     relationships = data.get("relationships", [])
 
     logging.info(f"Entities before entities_to_insert: {entities[:5]}") # Log first 5 entities
-    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties",ப்பட்டன)), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", []))) for e in entities]
+    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", []))) for e in entities]
     relationships_to_insert = [
         (
             hashlib.sha256(f"{r['source']}-{r['target']}-{r.get('type')}".encode()).hexdigest(),
@@ -674,6 +713,7 @@ consolidation_chain = RunnableSequence(
     aggregate_results,
     generate_embeddings,
     cluster_and_merge_entities,
+    deduplicate_entities,
     run_igraph_community_detection,
     migrate_to_spanner,
 )
