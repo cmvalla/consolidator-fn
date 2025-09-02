@@ -643,15 +643,35 @@ def run_igraph_community_detection(data):
     return data
 
 def migrate_to_spanner(data):
+    """Migrates the final graph data to Cloud Spanner, with robust filtering and error logging."""
     logging.info("Migrating data to Spanner...")
-    logging.info(f"Entities received by migrate_to_spanner: {data.get('entities', [])[:5]}") # Log first 5 entities
-    logging.info(f"Relationships received by migrate_to_spanner: {data.get('relationships', [])[:5]}") # Log first 5 relationships
-
+    
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
 
-    logging.info(f"Entities before entities_to_insert: {entities[:5]}") # Log first 5 entities
-    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", []))) for e in entities if e.get("id")]
+    # --- Robust Filtering ---
+    valid_entities = [e for e in entities if e.get("id") and isinstance(e.get("id"), str) and e["id"].strip()]
+    if len(valid_entities) != len(entities):
+        logging.warning(f"Filtered out {len(entities) - len(valid_entities)} entities with invalid IDs.")
+
+    valid_eids = {e["id"] for e in valid_entities}
+
+    entities_to_insert = [
+        (e["id"], e["type"], json.dumps(e.get("properties", {})), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", [])))
+        for e in valid_entities
+    ]
+
+    def is_valid_rel(r):
+        source = r.get("source")
+        target = r.get("target")
+        return source and isinstance(source, str) and source.strip() and \
+               target and isinstance(target, str) and target.strip() and \
+               source in valid_eids and target in valid_eids
+
+    valid_relationships = [r for r in relationships if is_valid_rel(r)]
+    if len(valid_relationships) != len(relationships):
+        logging.warning(f"Filtered out {len(relationships) - len(valid_relationships)} relationships with invalid or dangling EIDs.")
+
     relationships_to_insert = [
         (
             hashlib.sha256(f"{r['source']}-{r['target']}-{r.get('type')}".encode()).hexdigest(),
@@ -660,14 +680,15 @@ def migrate_to_spanner(data):
             r.get("type"),
             json.dumps(r.get("properties", {}))
         )
-        for r in relationships
-        if r.get('source') and r.get('target') and r.get('type') and r.get('type') != 'INSTANCE_OF'
+        for r in valid_relationships
+        if r.get('type') != 'INSTANCE_OF'
     ]
     instance_of_to_insert = [
         (r["source"], r["target"])
-        for r in relationships
-        if r.get('source') and r.get('target') and r.get('type') == 'INSTANCE_OF'
+        for r in valid_relationships
+        if r.get('type') == 'INSTANCE_OF'
     ]
+    # --- End of Filtering ---
 
     def chunk_list(lst, n):
         for i in range(0, len(lst), n):
@@ -675,43 +696,47 @@ def migrate_to_spanner(data):
 
     BATCH_SIZE = 100
 
-    for batch in chunk_list(entities_to_insert, BATCH_SIZE):
-        sample_batch = batch[:5] if len(batch) > 5 else batch
-        logging.info(f"Inserting/updating Entities table. Sample batch ({len(batch)} items): {sample_batch}")
-        eids_in_batch = [item[0] for item in batch] # Eid is the first element
-        logging.info(f"Entities Eids in batch: {eids_in_batch}")
-        spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-            table="Entities",
-            columns=("Eid", "Type", "Properties", "Embedding", "Communities"),
-            values=batch,
-        ))
-        logging.info(f"Inserted {len(batch)} entities.")
+    if entities_to_insert:
+        for batch in chunk_list(entities_to_insert, BATCH_SIZE):
+            try:
+                spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
+                    table="Entities",
+                    columns=("Eid", "Type", "Properties", "Embedding", "Communities"),
+                    values=batch,
+                ))
+                logging.info(f"Inserted/updated {len(batch)} entities.")
+            except Exception as e:
+                logging.error(f"Error inserting batch into Entities table: {e}")
+                logging.error(f"Failing batch data: {json.dumps(batch, indent=2)}")
+                raise e
 
-    # for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
-    #     sample_batch = batch[:5] if len(batch) > 5 else batch
-    #     logging.info(f"Inserting/updating Relationships table. Sample batch ({len(batch)} items): {sample_batch}")
-    #     rids_in_batch = [item[0] for item in batch] # Rid is the first element
-    #     logging.info(f"Relationships Rids in batch: {rids_in_batch}")
-    #     spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-    #         table="Relationships",
-    #         columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
-    #         values=batch,
-    #     ))
-    #     logging.info(f"Inserted {len(batch)} relationships.")
+    if relationships_to_insert:
+        for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
+            try:
+                spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
+                    table="Relationships",
+                    columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
+                    values=batch,
+                ))
+                logging.info(f"Inserted/updated {len(batch)} relationships.")
+            except Exception as e:
+                logging.error(f"Error inserting batch into Relationships table: {e}")
+                logging.error(f"Failing batch data: {json.dumps(batch, indent=2)}")
+                raise e
 
-    # for batch in chunk_list(instance_of_to_insert, BATCH_SIZE):
-    #     sample_batch = batch[:5] if len(batch) > 5 else batch
-    #     logging.info(f"Inserting/updating InstanceOf table. Sample batch ({len(batch)} items): {sample_batch}")
-    #     instance_class_eids_in_batch = [(item[0], item[1]) for item in batch] # (InstanceEid, ClassEid) are the first two elements
-    #     logging.info(f"Inserting/updating InstanceOf table. Sample batch ({len(batch)} items): {sample_batch}")
-    #     instance_class_eids_in_batch = [(item[0], item[1]) for item in batch] # (InstanceEid, ClassEid) are the first two elements
-    #     logging.info(f"InstanceOf InstanceEid, ClassEid in batch: {instance_class_eids_in_batch}")
-    #     spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-    #         table="InstanceOf",
-    #         columns=("InstanceEid", "ClassEid"),
-    #         values=batch,
-    #     ))
-    #     logging.info(f"Inserted {len(batch)} instance-of relationships.")
+    if instance_of_to_insert:
+        for batch in chunk_list(instance_of_to_insert, BATCH_SIZE):
+            try:
+                spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
+                    table="InstanceOf",
+                    columns=("InstanceEid", "ClassEid"),
+                    values=batch,
+                ))
+                logging.info(f"Inserted/updated {len(batch)} instance-of relationships.")
+            except Exception as e:
+                logging.error(f"Error inserting batch into InstanceOf table: {e}")
+                logging.error(f"Failing batch data: {json.dumps(batch, indent=2)}")
+                raise e
 
     return data
 
