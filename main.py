@@ -64,7 +64,7 @@ CLASS_SCHEMA = {
 
 CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate(
     template="You are a knowledge graph expert. You are tasked with creating a representative 'Class' entity from a collection of 'Instance' entities. "
-    "Based on the following instances, generate a JSON object for the 'Class' that adheres to the following JSON schema:\n\n"
+    "Based on the following instances, and the source text they were extracted from, generate a JSON object for the 'Class' that adheres to the following JSON schema:\n\n"
     "```json\n{schema}\n```\n\n"
     "Instances (as JSON objects):\n{instances_text}\n\n"
     "Source Text (for context):\n{source_text}\n\n"
@@ -126,7 +126,7 @@ def initialize_clients():
         
 
         logging.info("Initializing Vertex AI...")
-        llm = VertexAI(model_name="gemini-2.5-flash", location=LOCATION, response_mime_type="application/json")
+        llm = VertexAI(model_name="gemini-1.5-pro", location=LOCATION, response_mime_type="application/json")
         logging.info("Vertex AI clients initialized successfully.")
 
         logging.info("Initializing Spanner client...")
@@ -307,7 +307,7 @@ def generate_embeddings(data):
     return data
 
 def generate_class_properties(class_property_chain, instances_text, schema, source_text):
-    """Helper function to run LLM chain in a जेव्हा thread, with logging."""
+    """Helper function to run LLM chain in a thread, with logging."""
     prompt = CLASS_PROPERTY_GENERATION_PROMPT.format(instances_text=instances_text, schema=schema, source_text=source_text)
     logging.info(f"Querying LLM for class properties. Prompt length: {len(prompt)}. Prompt:\n{prompt}")
     response = class_property_chain.invoke({"instances_text": instances_text, "schema": schema, "source_text": source_text}).get("text")
@@ -325,9 +325,27 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     if not entities:
         return data
 
-    # Extract embeddings and entity IDs
-    entity_ids = [e["id"] for e in entities]
-    embeddings = np.array([e.get("embedding") for e in entities])
+    # --- Start of new logic ---
+    # 1. Create a map from entity ID to the entity object for quick lookups.
+    id_to_entity = {entity['id']: entity for entity in entities}
+
+    # 2. Create a map from an entity ID to its source chunk's text.
+    entity_id_to_source_text = {}
+    for rel in relationships:
+        if rel.get("type") == "ARE_PART_OF_CHUNK":
+            entity_id = rel.get("source")
+            chunk_id = rel.get("target")
+            if entity_id and chunk_id:
+                chunk_entity = id_to_entity.get(chunk_id)
+                if chunk_entity and chunk_entity.get("type") == "Chunk":
+                    original_text = chunk_entity.get("properties", {}).get("original_text")
+                    if original_text:
+                        entity_id_to_source_text[entity_id] = original_text
+    # --- End of new logic ---
+
+    # Extract embeddings and entity IDs, excluding Chunk and Community entities
+    entity_ids = [e["id"] for e in entities if e.get("type") not in ["Chunk", "Community"]]
+    embeddings = np.array([e.get("embedding") for e in entities if e.get("type") not in ["Chunk", "Community"]])
 
     # Filter out entities without embeddings
     valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None and len(emb) > 0]
@@ -338,9 +356,6 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     valid_embeddings = embeddings[valid_indices]
     valid_entity_ids = [entity_ids[i] for i in valid_indices]
     
-    # Create a map from valid_entity_ids to the full entity object
-    id_to_entity = {entity['id']: entity for entity in entities}
-
     # Calculate cosine similarity matrix
     similarity_matrix = cosine_similarity(valid_embeddings)
 
@@ -411,20 +426,22 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
             cluster_member_ids = [entity_id for entity_id, c_id in entity_id_map.items() if c_id == canonical_id]
             
             instances_text_parts = []
-            source_text_parts = []
+            source_text_parts = set() # Use a set to store unique source texts
             for member_id in cluster_member_ids:
                 member_entity = id_to_entity.get(member_id)
                 if member_entity:
                     properties = member_entity.get('properties', {})
                     instances_text_parts.append(f"- {json.dumps(properties)}")
-                    if member_entity.get('type') == 'Chunk':
-                        source_text_parts.append(properties.get('original_text', ''))
+                    # Use the pre-built map to find the source text
+                    source_text = entity_id_to_source_text.get(member_id)
+                    if source_text:
+                        source_text_parts.add(source_text)
             
             instances_text = "\n".join(instances_text_parts)
-            source_text = "\n".join(source_text_parts)
+            source_text_context = "\n\n---\n\n".join(source_text_parts)
             
             schema_str = json.dumps(CLASS_SCHEMA, indent=2)
-            future = executor.submit(generate_class_properties, class_property_chain, instances_text, schema_str, source_text)
+            future = executor.submit(generate_class_properties, class_property_chain, instances_text, schema_str, source_text_context)
             future_to_canonical_id[future] = (canonical_id, embedding)
 
         processed_clusters = 0
@@ -455,7 +472,9 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
 
     # Create instance nodes and INSTANCE_OF relationships
     for entity in entities:
-        entity["type"] = "Instance"
+        # Keep original entities, but mark them as instances
+        if entity.get("type") not in ["Chunk", "Community"]:
+            entity["type"] = "Instance"
         new_entities.append(entity)
         
         class_id = class_id_map.get(entity["id"])
@@ -468,14 +487,24 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
             }
             new_relationships.append(instance_of_rel)
 
-    # Update relationships
+    # Update relationships to point to class nodes
     for rel in relationships:
         source_class_id = class_id_map.get(rel.get("source"))
-        target_class_id = class_id_map.get(rel.get("target")),
-        if source_class_id and target_class_id:
+        target_class_id = class_id_map.get(rel.get("target"))
+        
+        # Promote relationship to class level if both source and target are in the same cluster
+        if source_class_id and target_class_id and source_class_id == target_class_id:
+            # This is an internal relationship within a class, we can either drop it or handle it.
+            # For now, we drop it to avoid self-loops on the class node.
+            continue
+        elif source_class_id and target_class_id:
+            # This is a relationship between two different classes
             rel["source"] = source_class_id
             rel["target"] = target_class_id
             new_relationships.append(rel)
+        # Keep original relationships between instances if they are not promoted
+        # else:
+        #     new_relationships.append(rel)
 
     data["entities"] = new_entities
     data["relationships"] = new_relationships
@@ -483,14 +512,6 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     logging.info(f"Clustering complete. Result: {len(new_entities)} entities, {len(new_relationships)} relationships.")
     return data
 
-
-
-
-
-
-
-
-    return data
 
 def run_igraph_community_detection(data):
     logging.info("Running igraph community detection...")
@@ -582,7 +603,7 @@ def migrate_to_spanner(data):
     relationships = data.get("relationships", [])
 
     logging.info(f"Entities before entities_to_insert: {entities[:5]}") # Log first 5 entities
-    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", []))) for e in entities]
+    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties",ப்பட்டன)), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", []))) for e in entities]
     relationships_to_insert = [
         (
             hashlib.sha256(f"{r['source']}-{r['target']}-{r.get('type')}".encode()).hexdigest(),
