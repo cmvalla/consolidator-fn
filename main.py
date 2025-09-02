@@ -233,7 +233,9 @@ def get_embedding(text: str, entity_id: str = "Unknown"):
 
     while retries < MAX_RETRIES:
         try:
-            token_response = requests.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email", headers={"Metadata-Flavor": "Google"})
+            # Fetch ID token for the embedding service
+            token_url = f"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={embedding_service_url}"
+            token_response = requests.get(token_url, headers={"Metadata-Flavor": "Google"})
             token = token_response.text
             headers = {"Authorization": f"Bearer {token}"}
             
