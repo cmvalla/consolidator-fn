@@ -76,14 +76,16 @@ CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate(
     input_variables=["instances_text", "schema", "source_text"]
 )
 
-def slugify(text):
-    """Creates a simple, clean ID from a string."""
-    if not text:
+def generate_class_eid(name):
+    """Creates a unique, URL-safe base64 ID from a string."""
+    if not name:
         return None
-    # Remove special characters
-    text = re.sub(r'[^\w\s-]', '', text.lower())
-    # Replace whitespace and hyphens with a single underscore
-    return re.sub(r'[-\s]+', '_', text).strip('_')
+    # Normalize the name first to create a consistent base for the ID
+    normalized_name = re.sub(r'[^\w\s-]', '', name.lower())
+    normalized_name = re.sub(r'[-\s]+', '_', normalized_name).strip('_')
+    
+    # Base64 encode the normalized name to ensure it is a safe string
+    return base64.urlsafe_b64encode(normalized_name.encode('utf-8')).decode('utf-8')
 
 def ensure_spanner_graph_exists(database):
     """
@@ -410,7 +412,7 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
             extracted_json_str = extract_json_from_llm_response(generated_properties_str)
             generated_properties = json.loads(extracted_json_str)
             class_name = generated_properties.get("name")
-            class_eid = slugify(class_name)
+            class_eid = generate_class_eid(class_name)
 
             if not class_eid:
                 logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
@@ -641,7 +643,7 @@ def migrate_to_spanner(data):
     relationships = data.get("relationships", [])
 
     logging.info(f"Entities before entities_to_insert: {entities[:5]}") # Log first 5 entities
-    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", []))) for e in entities]
+    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", []))) for e in entities if e.get("id")]
     relationships_to_insert = [
         (
             hashlib.sha256(f"{r['source']}-{r['target']}-{r.get('type')}".encode()).hexdigest(),
@@ -706,9 +708,9 @@ def migrate_to_spanner(data):
     return data
 
 # --- LangChain Sequence ---
-consolidation_chain = RunnableSequence(
-    decode_pubsub_message,
-    fetch_from_redis,
+
+# Define the processing chain, starting from aggregation
+processing_chain = RunnableSequence(
     aggregate_results,
     generate_embeddings,
     cluster_and_merge_entities,
@@ -731,16 +733,6 @@ def consolidator(cloud_event):
         if not fetched_data.get("partial_results"):
             logging.info(f"No data found in Redis for batch {data.get('batch_id')}. Stopping execution.")
             return "OK", 200
-
-        # Define the processing chain, starting from aggregation
-        processing_chain = RunnableSequence(
-            aggregate_results,
-            generate_embeddings,
-            cluster_and_merge_entities,
-            deduplicate_entities,
-            run_igraph_community_detection,
-            migrate_to_spanner,
-        )
 
         # Invoke the processing chain with the fetched data
         processing_chain.invoke(fetched_data)
