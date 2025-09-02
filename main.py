@@ -126,7 +126,7 @@ def initialize_clients():
         
 
         logging.info("Initializing Vertex AI...")
-        llm = VertexAI(model_name="gemini-2.5-flash", location=LOCATION, model_kwargs={"response_mime_type": "application/json"})
+        llm = VertexAI(model_name="gemini-2.5-flash", location=LOCATION, response_mime_type="application/json")
         logging.info("Vertex AI clients initialized successfully.")
 
         logging.info("Initializing Spanner client...")
