@@ -1,6 +1,6 @@
 steps:
 # Step 1: Build, Cache, and Push
-- name: 'europe-west1-docker.pkg.dev/spanner-demo-kid/my-docker-repo/gcp-terraform-build:latest'
+- name: '${LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/gcp-terraform-build:latest'
   id: build-and-push
   entrypoint: bash
   args:
@@ -20,7 +20,7 @@ steps:
     docker push ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME} --all-tags
 
 # Step 2A: Deploy the service
-- name: 'europe-west1-docker.pkg.dev/spanner-demo-kid/my-docker-repo/gcp-terraform-build:latest'
+- name: '${LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/gcp-terraform-build:latest'
   id: deploy
   entrypoint: sh
   args:
@@ -33,7 +33,7 @@ steps:
   waitFor: ['build-and-push']
 
 # Step 2B: Clean up old images (runs in parallel with deploy)
-- name: 'europe-west1-docker.pkg.dev/spanner-demo-kid/my-docker-repo/gcp-terraform-build:latest'
+- name: '${LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/gcp-terraform-build:latest'
   id: cleanup-images
   entrypoint: bash
   args:
