@@ -745,7 +745,9 @@ def migrate_to_spanner(data):
                 logging.info(f"Inserted/updated {len(batch)} instance-of relationships.")
             except Exception as e:
                 logging.error(f"Error inserting batch into InstanceOf table: {e}")
-                logging.error(f"Failing batch data: {json.dumps(batch, indent=2)}")
+                logging.error("Failing batch data for InstanceOf table:")
+                for row in batch:
+                    logging.error(f"  - {row}")
                 raise e
 
     return data
@@ -810,3 +812,4 @@ def consolidator(cloud_event):
                 logging.error(f"Could not update workflow status for batch ID {batch_id} to FAILED: {spanner_e}", exc_info=True)
 
         return "Internal Server Error", 500
+00
