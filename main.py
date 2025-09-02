@@ -43,8 +43,7 @@ spanner_database = None
 CLUSTER_SUMMARY_PROMPT = PromptTemplate.from_template(
     "Summarize the following collection of entities into a single, coherent paragraph. "
     "The summary should capture the main theme and characteristics of the cluster.\n\n"
-    "Entities:\n{cluster_text}\n\nSummary:"
-)
+    "Entities:\n{cluster_text}\n\nSummary:")
 
 SUMMARY_PROMPT = PromptTemplate.from_template(
     "Summarize the following text in one concise sentence:\n\n"
@@ -63,12 +62,14 @@ CLASS_SCHEMA = {
     "required": ["name", "description", "properties"]
 }
 
-CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate.from_template(
-    "You are a knowledge graph expert. You are tasked with creating a representative 'Class' entity from a collection of 'Instance' entities. "
+CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate(
+    template="You are a knowledge graph expert. You are tasked with creating a representative 'Class' entity from a collection of 'Instance' entities. "
     "Based on the following instances, generate a JSON object for the 'Class' that adheres to the following JSON schema:\n\n"
-    f"```json\n{json.dumps(CLASS_SCHEMA, indent=2)}\n```\n\n"
+    "```json\n{schema}\n```\n\n"
     "Instances (as JSON objects):\n{instances_text}\n\n"
-    "Respond with a single, valid JSON object for the 'Class' entity."
+    "Respond with a single, valid JSON object for the 'Class' entity.",
+    input_variables=["instances_text"],
+    partial_variables={"schema": json.dumps(CLASS_SCHEMA, indent=2)}
 )
 
 def ensure_spanner_graph_exists(database):
@@ -144,10 +145,10 @@ def initialize_clients():
 
 # --- LangChain Runnables ---
 def extract_json_from_llm_response(text):
-    '''
+    """
     Extracts a JSON object from the model's text response and performs basic validation.
     Handles markdown code blocks.
-    '''
+    """
     # Try to find a JSON block enclosed in ```json ... ```
     match = re.search(r"```json\s*({.*})```", text, re.DOTALL | re.IGNORECASE)
     if match:
@@ -464,7 +465,7 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     # Update relationships
     for rel in relationships:
         source_class_id = class_id_map.get(rel.get("source"))
-        target_class_id = class_id_map.get(rel.get("target"))
+        target_class_id = class_id_map.get(rel.get("target")),
         if source_class_id and target_class_id:
             rel["source"] = source_class_id
             rel["target"] = target_class_id
@@ -574,8 +575,22 @@ def migrate_to_spanner(data):
 
     logging.info(f"Entities before entities_to_insert: {entities[:5]}") # Log first 5 entities
     entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding", [0.0] * EMBEDDING_DIMENSION), e.get("communities", [])) for e in entities]
-    relationships_to_insert = [(hashlib.sha256(f"{r['source']}-{r['target']}-{r['type']}".encode()).hexdigest(), r["source"], r["target"], r["type"], json.dumps(r.get("properties", {}))) for r in relationships if r.get('source') and r.get('source') != '' and r.get('target') and r.get('target') != '' and r['type'] != 'INSTANCE_OF']
-    instance_of_to_insert = [(r["source"], r["target"]) for r in relationships if r.get('source') and r.get('source') != '' and r.get('target') and r.get('target') != '' and r['type'] == 'INSTANCE_OF']
+    relationships_to_insert = [
+        (
+            hashlib.sha256(f"{r['source']}-{r['target']}-{r.get('type')}".encode()).hexdigest(),
+            r["source"],
+            r["target"],
+            r.get("type"),
+            json.dumps(r.get("properties", {}))
+        )
+        for r in relationships
+        if r.get('source') and r.get('target') and r.get('type') and r.get('type') != 'INSTANCE_OF'
+    ]
+    instance_of_to_insert = [
+        (r["source"], r["target"])
+        for r in relationships
+        if r.get('source') and r.get('target') and r.get('type') == 'INSTANCE_OF'
+    ]
 
     def chunk_list(lst, n):
         for i in range(0, len(lst), n):
