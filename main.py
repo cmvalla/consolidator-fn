@@ -206,8 +206,7 @@ def fetch_from_redis(data):
     results_key = f"batch:{batch_id}:results"
     partial_results_str = redis_client.lrange(results_key, 0, -1)
     logging.info(f"Fetched {len(partial_results_str)} partial results from Redis for batch {batch_id}.")
-    if not partial_results_str:
-        logging.warning(f"No partial results found in Redis for batch {batch_id}. Key: {results_key}")
+    # This function now just returns the data, the check is in the main consolidator function
     return {"batch_id": batch_id, "partial_results": partial_results_str}
 
 def aggregate_results(data):
@@ -726,10 +725,27 @@ def consolidator(cloud_event):
         initialize_clients()
         
         data = decode_pubsub_message(cloud_event)
-        batch_id = data.get("batch_id")
-
-        consolidation_chain.invoke(data)
         
+        # Fetch data and check if it's empty
+        fetched_data = fetch_from_redis(data)
+        if not fetched_data.get("partial_results"):
+            logging.info(f"No data found in Redis for batch {data.get('batch_id')}. Stopping execution.")
+            return "OK", 200
+
+        # Define the processing chain, starting from aggregation
+        processing_chain = RunnableSequence(
+            aggregate_results,
+            generate_embeddings,
+            cluster_and_merge_entities,
+            deduplicate_entities,
+            run_igraph_community_detection,
+            migrate_to_spanner,
+        )
+
+        # Invoke the processing chain with the fetched data
+        processing_chain.invoke(fetched_data)
+        
+        batch_id = fetched_data.get("batch_id")
         # If everything is successful, update the status to SUCCEEDED
         if batch_id:
             with spanner_database.batch() as batch:
@@ -742,6 +758,7 @@ def consolidator(cloud_event):
 
         return "OK", 200
     except Exception as e:
+        batch_id = batch_id or (data and data.get("batch_id"))
         logging.error(f'An error occurred in the consolidator for batch_id {batch_id}: {e}', exc_info=True)
         
         # If an error occurs, update the status to FAILED
