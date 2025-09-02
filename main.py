@@ -717,7 +717,9 @@ def migrate_to_spanner(data):
                 logging.info(f"Inserted/updated {len(batch)} entities.")
             except Exception as e:
                 logging.error(f"Error inserting batch into Entities table: {e}")
-                logging.error(f"Failing batch data: {json.dumps(batch, indent=2)}")
+                logging.error("Failing entity IDs for Entities table:")
+                for row in batch:
+                    logging.error(f"  - entity_id: {row[0]}")
                 raise e
 
     if relationships_to_insert:
@@ -745,9 +747,9 @@ def migrate_to_spanner(data):
                 logging.info(f"Inserted/updated {len(batch)} instance-of relationships.")
             except Exception as e:
                 logging.error(f"Error inserting batch into InstanceOf table: {e}")
-                logging.error("Failing batch data for InstanceOf table:")
+                logging.error("Failing Eids for InstanceOf table:")
                 for row in batch:
-                    logging.error(f"  - {row}")
+                    logging.error(f"  - InstanceEid: {row[0]}, ClassEid: {row[1]}")
                 raise e
 
     return data
