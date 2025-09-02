@@ -386,63 +386,71 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     name_to_class_entity = {}
     class_id_map = {}
 
-    for cluster_member_ids in clusters:
-        instances_text_parts = []
-        source_text_parts = set() # Use a set to store unique source texts
-        cluster_text_parts = []
+    with ThreadPoolExecutor(max_workers=int(os.environ.get("MAX_WORKERS", 5))) as executor:
+        future_to_cluster = {}
+        for cluster_member_ids in clusters:
+            instances_text_parts = []
+            source_text_parts = set()
+            cluster_text_parts = []
 
-        for member_id in cluster_member_ids:
-            member_entity = id_to_entity.get(member_id)
-            if member_entity:
-                properties = member_entity.get('properties', {})
-                instances_text_parts.append(f"- {json.dumps(properties)}")
-                source_text = entity_id_to_source_text.get(member_id)
-                if source_text:
-                    source_text_parts.add(source_text)
-                
-                entity_type = member_entity.get('type', '')
-                cluster_text_parts.append(f"Type: {entity_type}, Properties: {json.dumps(properties)}")
+            for member_id in cluster_member_ids:
+                member_entity = id_to_entity.get(member_id)
+                if member_entity:
+                    properties = member_entity.get('properties', {})
+                    instances_text_parts.append(f"- {json.dumps(properties)}")
+                    source_text = entity_id_to_source_text.get(member_id)
+                    if source_text:
+                        source_text_parts.add(source_text)
+                    
+                    entity_type = member_entity.get('type', '')
+                    cluster_text_parts.append(f"Type: {entity_type}, Properties: {json.dumps(properties)}")
 
-        instances_text = "\n".join(instances_text_parts)
-        source_text_context = "\n\n---\n\n".join(source_text_parts)
-        schema_str = json.dumps(CLASS_SCHEMA, indent=2)
+            instances_text = "\n".join(instances_text_parts)
+            source_text_context = "\n\n---\n\n".join(source_text_parts)
+            schema_str = json.dumps(CLASS_SCHEMA, indent=2)
+            
+            future = executor.submit(generate_class_properties, class_property_chain, instances_text, schema_str, source_text_context)
+            future_to_cluster[future] = {
+                "member_ids": cluster_member_ids,
+                "cluster_text": " ".join(cluster_text_parts)
+            }
 
-        try:
-            generated_properties_str = generate_class_properties(class_property_chain, instances_text, schema_str, source_text_context)
-            extracted_json_str = extract_json_from_llm_response(generated_properties_str)
-            generated_properties = json.loads(extracted_json_str)
-            class_name = generated_properties.get("name")
-            class_eid = generate_class_eid(class_name)
+        for future in as_completed(future_to_cluster):
+            cluster_info = future_to_cluster[future]
+            cluster_member_ids = cluster_info["member_ids"]
+            try:
+                generated_properties_str = future.result()
+                extracted_json_str = extract_json_from_llm_response(generated_properties_str)
+                generated_properties = json.loads(extracted_json_str)
+                class_name = generated_properties.get("name")
+                class_eid = generate_class_eid(class_name)
 
-            if not class_eid:
-                logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
-                continue
+                if not class_eid:
+                    logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
+                    continue
 
-            if class_name in name_to_class_entity:
-                # Merge with existing class
-                existing_class_eid = name_to_class_entity[class_name]["id"]
-                for member_id in cluster_member_ids:
-                    class_id_map[member_id] = existing_class_eid
-                logging.info(f"Merged cluster into existing class '{class_name}' (ID: {existing_class_eid})")
-            else:
-                # Create new class
-                cluster_text = " ".join(cluster_text_parts)
-                summary = summarization_chain.invoke({"cluster_text": cluster_text}).get("text")
-                embedding = get_embedding(summary, class_eid)
+                if class_name in name_to_class_entity:
+                    existing_class_eid = name_to_class_entity[class_name]["id"]
+                    for member_id in cluster_member_ids:
+                        class_id_map[member_id] = existing_class_eid
+                    logging.info(f"Merged cluster into existing class '{class_name}' (ID: {existing_class_eid})")
+                else:
+                    summary = summarization_chain.invoke({"cluster_text": cluster_info["cluster_text"]}).get("text")
+                    embedding = get_embedding(summary, class_eid)
+                    class_entity = {
+                        "id": class_eid,
+                        "type": "Class",
+                        "properties": generated_properties,
+                        "embedding": embedding
+                    }
+                    name_to_class_entity[class_name] = class_entity
+                    for member_id in cluster_member_ids:
+                        class_id_map[member_id] = class_eid
+                    logging.info(f"Created new class '{class_name}' (ID: {class_eid})")
 
-                class_entity = {
-                    "id": class_eid,
-                    "type": "Class",
-                    "properties": generated_properties,
-                    "embedding": embedding
-                }
-                name_to_class_entity[class_name] = class_entity
-                for member_id in cluster_member_ids:
-                    class_id_map[member_id] = class_eid
-                logging.info(f"Created new class '{class_name}' (ID: {class_eid})")
+            except Exception as e:
+                logging.error(f"Failed to process future for cluster: {e}", exc_info=True)
 
-        except Exception as e:
-            logging.error(f"Failed to process cluster: {e}", exc_info=True)
 
     new_entities = list(name_to_class_entity.values())
     new_relationships = []
@@ -724,7 +732,7 @@ processing_chain = RunnableSequence(
 def consolidator(cloud_event):
     batch_id = None
     try:
-        initialize_clients()
+        initialize_clients() # This function initializes global clients
         
         data = decode_pubsub_message(cloud_event)
         
