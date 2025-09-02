@@ -67,9 +67,9 @@ CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate(
     "Based on the following instances, generate a JSON object for the 'Class' that adheres to the following JSON schema:\n\n"
     "```json\n{schema}\n```\n\n"
     "Instances (as JSON objects):\n{instances_text}\n\n"
+    "Source Text (for context):\n{source_text}\n\n"
     "Respond with a single, valid JSON object for the 'Class' entity.",
-    input_variables=["instances_text"],
-    partial_variables={"schema": json.dumps(CLASS_SCHEMA, indent=2)}
+    input_variables=["instances_text", "schema", "source_text"]
 )
 
 def ensure_spanner_graph_exists(database):
@@ -287,7 +287,7 @@ def generate_embeddings(data):
                 logging.warning(f"Chunk {entity.get('id')} has an empty summary. Generating a new one.")
                 original_text = properties.get('original_text', '')
                 if original_text:
-                    summary = summarization_chain.run(text_chunk=original_text)
+                    summary = summarization_chain.invoke({"text_chunk": original_text}).get("text")
                     properties['summary'] = summary
                     text_to_embed = summary
                 else:
@@ -306,10 +306,11 @@ def generate_embeddings(data):
 
     return data
 
-def generate_class_properties(class_property_chain, instances_text):
-    """Helper function to run LLM chain in a thread, with logging."""
-    logging.info(f"Querying LLM for class properties with the following instances:\n{instances_text}")
-    response = class_property_chain.run(instances_text=instances_text)
+def generate_class_properties(class_property_chain, instances_text, schema, source_text):
+    """Helper function to run LLM chain in a जेव्हा thread, with logging."""
+    prompt = CLASS_PROPERTY_GENERATION_PROMPT.format(instances_text=instances_text, schema=schema, source_text=source_text)
+    logging.info(f"Querying LLM for class properties. Prompt length: {len(prompt)}. Prompt:\n{prompt}")
+    response = class_property_chain.invoke({"instances_text": instances_text, "schema": schema, "source_text": source_text}).get("text")
     logging.info(f"LLM response for class properties: {response}")
     return response
 
@@ -383,7 +384,7 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
         
         # Summarize the cluster text and generate embedding
         if cluster_text:
-            summary = summarization_chain.run(cluster_text=cluster_text)
+            summary = summarization_chain.invoke({"cluster_text": cluster_text}).get("text")
             embedding = get_embedding(summary, f"class_{canonical_id}")
         else:
             embedding = [0.0] * EMBEDDING_DIMENSION
@@ -410,15 +411,20 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
             cluster_member_ids = [entity_id for entity_id, c_id in entity_id_map.items() if c_id == canonical_id]
             
             instances_text_parts = []
+            source_text_parts = []
             for member_id in cluster_member_ids:
                 member_entity = id_to_entity.get(member_id)
                 if member_entity:
                     properties = member_entity.get('properties', {})
                     instances_text_parts.append(f"- {json.dumps(properties)}")
+                    if member_entity.get('type') == 'Chunk':
+                        source_text_parts.append(properties.get('original_text', ''))
             
             instances_text = "\n".join(instances_text_parts)
+            source_text = "\n".join(source_text_parts)
             
-            future = executor.submit(generate_class_properties, class_property_chain, instances_text)
+            schema_str = json.dumps(CLASS_SCHEMA, indent=2)
+            future = executor.submit(generate_class_properties, class_property_chain, instances_text, schema_str, source_text)
             future_to_canonical_id[future] = (canonical_id, embedding)
 
         processed_clusters = 0
@@ -476,6 +482,8 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
     
     logging.info(f"Clustering complete. Result: {len(new_entities)} entities, {len(new_relationships)} relationships.")
     return data
+
+
 
 
 
@@ -574,7 +582,7 @@ def migrate_to_spanner(data):
     relationships = data.get("relationships", [])
 
     logging.info(f"Entities before entities_to_insert: {entities[:5]}") # Log first 5 entities
-    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), e.get("embedding", [0.0] * EMBEDDING_DIMENSION), e.get("communities", [])) for e in entities]
+    entities_to_insert = [(e["id"], e["type"], json.dumps(e.get("properties", {})), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", []))) for e in entities]
     relationships_to_insert = [
         (
             hashlib.sha256(f"{r['source']}-{r['target']}-{r.get('type')}".encode()).hexdigest(),
