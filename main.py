@@ -567,7 +567,7 @@ def deduplicate_entities(data):
         if all(e.get("type") == "Class" for e in group):
             logging.info(f"Handling duplicate Class EID: {eid}")
             # Count instances for each class
-            instance_counts = {e["id"]: 0 for e in group}
+            instance_counts = {e["id"За 0 for e in group}
             for rel in relationships:
                 if rel.get("type") == "INSTANCE_OF" and rel.get("target") in instance_counts:
                     instance_counts[rel.get("target")] += 1
@@ -599,9 +599,24 @@ def deduplicate_entities(data):
                 final_entities[new_eid] = duplicate
                 logging.info(f"Renamed duplicate instance '{original_id}' to '{new_eid}'.")
         else:
-            logging.warning(f"Unhandled duplicate EID case for eid '{eid}'. Keeping all entities.")
-            for entity in group:
-                final_entities[entity["id"]] = entity
+            logging.warning(f"Unhandled duplicate EID case for eid '{eid}'. Renaming duplicates.")
+            # Keep the first entity, and rename the rest to avoid collisions
+            if group:
+                winner = group[0]
+                final_entities[winner["id"]] = winner
+                
+                for duplicate in group[1:]:
+                    original_id = duplicate["id"]
+                    while True:
+                        # Generate a new unique ID
+                        new_eid = f"{original_id}_{uuid.uuid4().hex[:6]}"
+                        if new_eid not in id_to_entity and new_eid not in final_entities:
+                            break
+                    
+                    eids_to_remap[original_id] = new_eid
+                    duplicate["id"] = new_eid
+                    final_entities[new_eid] = duplicate
+                    logging.info(f"Renamed duplicate entity '{original_id}' of type '{duplicate.get('type')}' to '{new_eid}'.")
 
     # Remap relationships
     for rel in relationships:
