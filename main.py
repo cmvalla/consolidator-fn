@@ -759,7 +759,9 @@ def migrate_to_spanner(data):
                 ))
                 logging.info(f"Inserted/updated {len(batch)} entities.")
             except Exception as e:
-                logging.error(f"Error inserting batch into Entities table: {e}")
+                logging.error(f"Error inserting batch into Entities table: {e}", exc_info=True)
+                if hasattr(e, 'details'):
+                    logging.error(f"  Details: {e.details()}")
                 logging.error("Failing entity IDs for Entities table:")
                 for row in batch:
                     logging.error(f"  - entity_id: {row[0]}")
@@ -775,7 +777,9 @@ def migrate_to_spanner(data):
                 ))
                 logging.info(f"Inserted/updated {len(batch)} relationships.")
             except Exception as e:
-                logging.error(f"Error inserting batch into Relationships table: {e}")
+                logging.error(f"Error inserting batch into Relationships table: {e}", exc_info=True)
+                if hasattr(e, 'details'):
+                    logging.error(f"  Details: {e.details()}")
                 logging.error("Failing Rids for Relationships table:")
                 for row in batch:
                     logging.error(f"  - Rid: {row[0]}")
@@ -791,7 +795,9 @@ def migrate_to_spanner(data):
                 ))
                 logging.info(f"Inserted/updated {len(batch)} instance-of relationships.")
             except Exception as e:
-                logging.error(f"Error inserting batch into InstanceOf table: {e}")
+                logging.error(f"Error inserting batch into InstanceOf table: {e}", exc_info=True)
+                if hasattr(e, 'details'):
+                    logging.error(f"  Details: {e.details()}")
                 logging.error("Failing Eids for InstanceOf table:")
                 for row in batch:
                     logging.error(f"  - InstanceEid: {row[0]}, ClassEid: {row[1]}")
