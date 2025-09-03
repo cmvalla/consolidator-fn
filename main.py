@@ -804,12 +804,11 @@ def migrate_to_spanner(data):
 # Define the processing chain, starting from aggregation
 processing_chain = RunnableSequence(
     aggregate_results,
-    store_consolidated_results_in_redis,
     generate_embeddings,
-    store_consolidated_results_in_redis,
     cluster_and_merge_entities,
     deduplicate_entities,
     run_igraph_community_detection,
+    store_consolidated_results_in_redis,
     migrate_to_spanner,
 )
 
