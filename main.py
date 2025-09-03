@@ -85,7 +85,7 @@ def generate_class_eid(name):
     normalized_name = re.sub(r'[-\s]+', '_', normalized_name).strip('_')
     
     # Base64 encode the normalized name to ensure it is a safe string
-    return base64.urlsafe_b64encode(normalized_name.encode('utf-8')).decode('utf-8')
+    return base64.urlsafe_b64encode(normalized_name.encode('utf-8')).decode('utf-8').replace('=', '-')
 
 def ensure_spanner_graph_exists(database):
     """
