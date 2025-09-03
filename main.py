@@ -829,15 +829,23 @@ def consolidator(cloud_event):
         batch_id = data.get("batch_id")
 
         consolidated_key = f"consolidated_batch:{batch_id}"
-        if redis_client.exists(consolidated_key):
+        redis_key_exists = redis_client.exists(consolidated_key)
+        logging.info(f"Redis key {consolidated_key} exists: {redis_key_exists}")
+
+        if redis_key_exists:
             logging.info(f"Consolidated data for batch {batch_id} found in Redis. Skipping processing chain and migrating directly to Spanner.")
             
             # Retrieve data from Redis
             redis_data = redis_client.hgetall(consolidated_key)
+            logging.info(f"Raw Redis data for batch {batch_id}: {redis_data}")
+            
             # Decode keys from bytes to strings
             decoded_redis_data = {k.decode('utf-8'): v for k, v in redis_data.items()}
+            logging.info(f"Decoded Redis data for batch {batch_id}: {decoded_redis_data}")
+            
             entities = json.loads(decoded_redis_data["entities"])
             relationships = json.loads(decoded_redis_data["relationships"])
+            logging.info(f"Parsed entities count: {len(entities)}, relationships count: {len(relationships)}")
             
             # Create a data dictionary similar to what the processing chain would output
             data_from_redis = {
@@ -846,8 +854,10 @@ def consolidator(cloud_event):
                 "relationships": relationships
             }
             
+            logging.info(f"Attempting to migrate data from Redis to Spanner for batch {batch_id}.")
             # Migrate directly to Spanner
             migrate_to_spanner(data_from_redis)
+            logging.info(f"Successfully migrated data from Redis to Spanner for batch {batch_id}.")
             
             # Update workflow status to SUCCEEDED
             with spanner_database.batch() as batch:
