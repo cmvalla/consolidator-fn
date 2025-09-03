@@ -828,8 +828,10 @@ def consolidator(cloud_event):
             
             # Retrieve data from Redis
             redis_data = redis_client.hgetall(consolidated_key)
-            entities = json.loads(redis_data[b"entities"])
-            relationships = json.loads(redis_data[b"relationships"])
+            # Decode keys from bytes to strings
+            decoded_redis_data = {k.decode('utf-8'): v for k, v in redis_data.items()}
+            entities = json.loads(decoded_redis_data["entities"])
+            relationships = json.loads(decoded_redis_data["relationships"])
             
             # Create a data dictionary similar to what the processing chain would output
             data_from_redis = {
