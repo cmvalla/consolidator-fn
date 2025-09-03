@@ -211,7 +211,11 @@ def decode_pubsub_message(cloud_event):
 
     message_data = base64.b64decode(event_data["message"]["data"]).decode("utf-8")
     message_json = json.loads(message_data)
-    return {"batch_id": message_json.get("batch_id")}
+    batch_id = message_json.get("batch_id")
+    if not batch_id:
+        batch_id = str(uuid.uuid4().hex)
+        logging.warning(f"Batch ID not found in Pub/Sub message. Generating new batch ID: {batch_id}")
+    return {"batch_id": batch_id}
 
 def fetch_from_redis(data):
     batch_id = data["batch_id"]
