@@ -211,11 +211,7 @@ def decode_pubsub_message(cloud_event):
 
     message_data = base64.b64decode(event_data["message"]["data"]).decode("utf-8")
     message_json = json.loads(message_data)
-    batch_id = message_json.get("batch_id")
-    if not batch_id:
-        batch_id = str(uuid.uuid4().hex)
-        logging.warning(f"Batch ID not found in Pub/Sub message. Generating new batch ID: {batch_id}")
-    return {"batch_id": batch_id}
+    return {"batch_id": message_json.get("batch_id")}
 
 def fetch_from_redis(data):
     batch_id = data["batch_id"]
@@ -844,7 +840,7 @@ def consolidator(cloud_event):
             logging.info(f"Raw Redis data for batch {batch_id}: {redis_data}")
             
             # Decode keys from bytes to strings
-            decoded_redis_data = {k.decode('utf-8'): v for k, v in redis_data.items()}
+            decoded_redis_data = {k: v for k, v in redis_data.items()}
             logging.info(f"Decoded Redis data for batch {batch_id}: {decoded_redis_data}")
             
             entities = json.loads(decoded_redis_data["entities"])
