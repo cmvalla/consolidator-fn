@@ -820,7 +820,37 @@ def consolidator(cloud_event):
         initialize_clients() # This function initializes global clients
         
         data = decode_pubsub_message(cloud_event)
-        
+        batch_id = data.get("batch_id")
+
+        consolidated_key = f"consolidated_batch:{batch_id}"
+        if redis_client.exists(consolidated_key):
+            logging.info(f"Consolidated data for batch {batch_id} found in Redis. Skipping processing chain and migrating directly to Spanner.")
+            
+            # Retrieve data from Redis
+            redis_data = redis_client.hgetall(consolidated_key)
+            entities = json.loads(redis_data[b"entities"])
+            relationships = json.loads(redis_data[b"relationships"])
+            
+            # Create a data dictionary similar to what the processing chain would output
+            data_from_redis = {
+                "batch_id": batch_id,
+                "entities": entities,
+                "relationships": relationships
+            }
+            
+            # Migrate directly to Spanner
+            migrate_to_spanner(data_from_redis)
+            
+            # Update workflow status to SUCCEEDED
+            with spanner_database.batch() as batch:
+                batch.update(
+                    table="WorkflowStatus",
+                    columns=("BatchId", "Status", "UpdatedAt"),
+                    values=[(batch_id, "SUCCEEDED", spanner.COMMIT_TIMESTAMP)],
+                )
+            logging.info(f"Successfully updated workflow status for batch ID {batch_id} to SUCCEEDED (from Redis)." )
+            return "OK", 200
+
         # Fetch data and check if it's empty
         fetched_data = fetch_from_redis(data)
         if not fetched_data.get("partial_results"):
@@ -830,7 +860,6 @@ def consolidator(cloud_event):
         # Invoke the processing chain with the fetched data
         processing_chain.invoke(fetched_data)
         
-        batch_id = fetched_data.get("batch_id")
         # If everything is successful, update the status to SUCCEEDED
         if batch_id:
             with spanner_database.batch() as batch:
