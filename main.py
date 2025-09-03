@@ -733,7 +733,9 @@ def migrate_to_spanner(data):
                 logging.info(f"Inserted/updated {len(batch)} relationships.")
             except Exception as e:
                 logging.error(f"Error inserting batch into Relationships table: {e}")
-                logging.error(f"Failing batch data: {json.dumps(batch, indent=2)}")
+                logging.error("Failing Rids for Relationships table:")
+                for row in batch:
+                    logging.error(f"  - Rid: {row[0]}")
                 raise e
 
     if instance_of_to_insert:
