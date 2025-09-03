@@ -105,3 +105,9 @@ variable "spanner_database_id" {
   type        = string
   description = "The Spanner database ID."
 }
+
+variable "use_gemini_embeddings" {
+  description = "Set to true to use Gemini Embeddings (gemini-embeddings-001) instead of the external embedding service."
+  type        = bool
+  default     = false
+}

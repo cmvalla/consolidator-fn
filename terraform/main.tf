@@ -78,6 +78,10 @@ resource "google_cloud_run_v2_service" "consolidator" {
           value = var.region
         }
         env {
+          name  = "USE_GEMINI_EMBEDDINGS"
+          value = var.use_gemini_embeddings ? "true" : "false"
+        }
+        env {
           name  = "EMBEDDING_SERVICE_URL"
           value = data.google_cloud_run_v2_service.embedding_service.uri
         }
