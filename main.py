@@ -242,6 +242,24 @@ def aggregate_results(data):
         "relationships": all_relationships
     }
 
+def store_consolidated_results_in_redis(data):
+    """Stores the consolidated entities and relationships in Redis."""
+    batch_id = data["batch_id"]
+    consolidated_key = f"consolidated_batch:{batch_id}"
+    
+    try:
+        # Store entities and relationships as JSON strings in a Redis hash
+        redis_client.hset(consolidated_key, mapping={
+            "entities": json.dumps(data["entities"]),
+            "relationships": json.dumps(data["relationships"])
+        })
+        # Set an expiry for the key (e.g., 24 hours)
+        redis_client.expire(consolidated_key, 86400)
+        logging.info(f"Stored consolidated results for batch {batch_id} in Redis.")
+    except Exception as e:
+        logging.error(f"Error storing consolidated results for batch {batch_id} in Redis: {e}", exc_info=True)
+    return data
+
 def get_embedding(text: str, entity_id: str = "Unknown"):
     """Generates an embedding for a given text, with retry logic, using either Gemini Embeddings or an external service."""
     
@@ -786,6 +804,7 @@ def migrate_to_spanner(data):
 # Define the processing chain, starting from aggregation
 processing_chain = RunnableSequence(
     aggregate_results,
+    store_consolidated_results_in_redis,
     generate_embeddings,
     cluster_and_merge_entities,
     deduplicate_entities,
