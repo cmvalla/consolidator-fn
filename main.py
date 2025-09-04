@@ -567,7 +567,7 @@ def deduplicate_entities(data):
         if all(e.get("type") == "Class" for e in group):
             logging.info(f"Handling duplicate Class EID: {eid}")
             # Count instances for each class
-            instance_counts = {e["id"За 0 for e in group}
+            instance_counts = {e["id"]: 0 for e in group}
             for rel in relationships:
                 if rel.get("type") == "INSTANCE_OF" and rel.get("target") in instance_counts:
                     instance_counts[rel.get("target")] += 1
@@ -725,7 +725,8 @@ def migrate_to_spanner(data):
     valid_eids = {e["id"] for e in valid_entities}
 
     entities_to_insert = [
-        (e["id"], e["type"], json.dumps(e.get("properties", {})), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", [])))
+        (e["id"], e["type"], json.dumps(e.get("properties", {})
+        ), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", [])))
         for e in valid_entities
     ]
 
