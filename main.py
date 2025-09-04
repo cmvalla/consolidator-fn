@@ -12,7 +12,7 @@ import numpy as np
 import uuid
 from sklearn.metrics.pairwise import cosine_similarity
 
-from langchain_google_vertexai import VertexAI, VertexAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence, RunnablePassthrough
@@ -25,8 +25,6 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 EMBEDDING_DIMENSION = 768
-gemini_embeddings_client = None
-
 
 
 # --- Boilerplate and Configuration ---
@@ -124,13 +122,7 @@ def initialize_clients():
         LOCATION = os.environ.get("LOCATION")
 
         # --- Embedding Model Configuration ---
-        USE_GEMINI_EMBEDDINGS = os.environ.get("USE_GEMINI_EMBEDDINGS", "false").lower() == "true"
-        if USE_GEMINI_EMBEDDINGS:
-            logging.info("Initializing Gemini Embeddings client...")
-            gemini_embeddings_client = VertexAIEmbeddings(model_name="gemini-embeddings-001", project=GCP_PROJECT, location=LOCATION)
-            logging.info("Gemini Embeddings client initialized successfully.")
-        else:
-            logging.info("Using external embedding service.")
+        # Using external embedding service.
         
         # --- Secret Manager ---
         sm_client = secretmanager.SecretManagerServiceClient()
@@ -151,7 +143,7 @@ def initialize_clients():
         
 
         logging.info("Initializing Vertex AI...")
-        llm = VertexAI(model_name="gemini-2.5-flash", location=LOCATION, response_mime_type="application/json")
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", convert_system_message_to_human=True)
         logging.info("Vertex AI clients initialized successfully.")
 
         logging.info("Initializing Spanner client...")
@@ -261,71 +253,56 @@ def store_consolidated_results_in_redis(data):
     return data
 
 def get_embedding(text: str, entity_id: str = "Unknown"):
-    """Generates an embedding for a given text, with retry logic, using either Gemini Embeddings or an external service."""
+    """Generates an embedding for a given text by calling the graphrag-embedding service."""
+    embedding_service_url = os.environ.get("EMBEDDING_SERVICE_URL")
+    if not embedding_service_url:
+        logging.error("EMBEDDING_SERVICE_URL environment variable not set.")
+        return [0.0] * EMBEDDING_DIMENSION
+
+    MAX_RETRIES = 10
+    INITIAL_BACKOFF_SECONDS = 1
+    MAX_BACKOFF_SECONDS = 600  # 10 minutes
     
-    USE_GEMINI_EMBEDDINGS = os.environ.get("USE_GEMINI_EMBEDDINGS", "false").lower() == "true"
+    retries = 0
+    backoff_seconds = INITIAL_BACKOFF_SECONDS
 
-    if USE_GEMINI_EMBEDDINGS:
-        if gemini_embeddings_client is None:
-            logging.error("Gemini Embeddings client not initialized.")
-            return [0.0] * EMBEDDING_DIMENSION
+    while retries < MAX_RETRIES:
         try:
-            logging.info(f"Generating Gemini embedding for entity {entity_id}")
-            embedding = gemini_embeddings_client.embed_query(text)
-            return embedding
-        except Exception as e:
-            logging.error(f"Error generating Gemini embedding for entity {entity_id}: {e}", exc_info=True)
-            return [0.0] * EMBEDDING_DIMENSION
-    else:
-        embedding_service_url = os.environ.get("EMBEDDING_SERVICE_URL")
-        if not embedding_service_url:
-            logging.error("EMBEDDING_SERVICE_URL environment variable not set.")
-            return [0.0] * EMBEDDING_DIMENSION
-
-        MAX_RETRIES = 10
-        INITIAL_BACKOFF_SECONDS = 1
-        MAX_BACKOFF_SECONDS = 600  # 10 minutes
-        
-        retries = 0
-        backoff_seconds = INITIAL_BACKOFF_SECONDS
-
-        while retries < MAX_RETRIES:
-            try:
-                # Fetch ID token for the embedding service
-                token_url = f"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={embedding_service_url}"
-                token_response = requests.get(token_url, headers={"Metadata-Flavor": "Google"})
-                token = token_response.text
-                headers = {"Authorization": f"Bearer {token}"}
-                
-                response = requests.post(embedding_service_url, json={"text": text}, headers=headers)
-                
-                if response.status_code == 200:
-                    embedding = response.json().get("embedding")
-                    if embedding:
-                        return embedding
-                    else:
-                        logging.warning(f"Embedding not found in response for entity: {entity_id}")
-                        return [0.0] * EMBEDDING_DIMENSION
-                
-                elif response.status_code >= 500:
-                    logging.warning(f"Embedding service returned a server error ({response.status_code}) for entity {entity_id}. Retrying in {backoff_seconds} seconds...")
-                    time.sleep(backoff_seconds)
-                    retries += 1
-                    backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
-                
+            # Fetch ID token for the embedding service
+            token_url = f"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={embedding_service_url}"
+            token_response = requests.get(token_url, headers={"Metadata-Flavor": "Google"})
+            token = token_response.text
+            headers = {"Authorization": f"Bearer {token}"}
+            
+            response = requests.post(embedding_service_url, json={"text": text, "embedding_source": "gemini"}, headers=headers)
+            
+            if response.status_code == 200:
+                embedding = response.json().get("embedding")
+                if embedding:
+                    return embedding
                 else:
-                    logging.error(f"Embedding service returned a client error ({response.status_code}) for entity {entity_id}: {response.text}")
-                    response.raise_for_status()
+                    logging.warning(f"Embedding not found in response for entity: {entity_id}")
                     return [0.0] * EMBEDDING_DIMENSION
-
-            except requests.exceptions.RequestException as e:
-                logging.error(f"Error calling embedding service for entity {entity_id}: {e}")
+            
+            elif response.status_code >= 500:
+                logging.warning(f"Embedding service returned a server error ({response.status_code}) for entity {entity_id}. Retrying in {backoff_seconds} seconds...")
                 time.sleep(backoff_seconds)
                 retries += 1
                 backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
+            
+            else:
+                logging.error(f"Embedding service returned a client error ({response.status_code}) for entity {entity_id}: {response.text}")
+                response.raise_for_status()
+                return [0.0] * EMBEDDING_DIMENSION
 
-        logging.error(f"Failed to get embedding for entity {entity_id} after {MAX_RETRIES} retries.")
-        return [0.0] * EMBEDDING_DIMENSION
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error calling embedding service for entity {entity_id}: {e}")
+            time.sleep(backoff_seconds)
+            retries += 1
+            backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
+
+    logging.error(f"Failed to get embedding for entity {entity_id} after {MAX_RETRIES} retries.")
+    return [0.0] * EMBEDDING_DIMENSION
 
 def generate_embeddings(data):
     """Generates embeddings for all entities and communities."""
