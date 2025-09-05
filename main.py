@@ -742,38 +742,35 @@ def migrate_to_spanner(data):
 
     BATCH_SIZE = 100
 
-    def spanner_insert_or_update(transaction):
-        logging.info(f"Inside spanner_insert_or_update. Type of transaction: {type(transaction)}")
-        logging.info(f"Type of transaction.insert_or_update: {type(transaction.insert_or_update)}")
-        if entities_to_insert:
-            for entity_batch_values in chunk_list(entities_to_insert, BATCH_SIZE):
-                transaction.insert_or_update(
-                    table="Entities",
-                    columns=("Eid", "Type", "Properties", "Embedding", "Communities"),
-                    values=entity_batch_values,
-                )
-            logging.info(f"Batched {len(entities_to_insert)} entities for insertion/update.")
-
-        if relationships_to_insert:
-            for rel_batch_values in chunk_list(relationships_to_insert, BATCH_SIZE):
-                transaction.insert_or_update(
-                    table="Relationships",
-                    columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
-                    values=rel_batch_values,
-                )
-            logging.info(f"Batched {len(relationships_to_insert)} relationships for insertion/update.")
-
-        if instance_of_to_insert:
-            for inst_batch_values in chunk_list(instance_of_to_insert, BATCH_SIZE):
-                transaction.insert_or_update(
-                    table="InstanceOf",
-                    columns=("InstanceEid", "ClassEid"),
-                    values=inst_batch_values,
-                )
-            logging.info(f"Batched {len(instance_of_to_insert)} instance-of relationships for insertion/update.")
-
     try:
-        spanner_database.run_in_transaction(spanner_insert_or_update)
+        with spanner_database.batch() as batch:
+            if entities_to_insert:
+                for entity_batch_values in chunk_list(entities_to_insert, BATCH_SIZE):
+                    batch.insert_or_update(
+                        table="Entities",
+                        columns=("Eid", "Type", "Properties", "Embedding", "Communities"),
+                        values=entity_batch_values,
+                    )
+                logging.info(f"Batched {len(entities_to_insert)} entities for insertion/update.")
+
+            if relationships_to_insert:
+                for rel_batch_values in chunk_list(relationships_to_insert, BATCH_SIZE):
+                    batch.insert_or_update(
+                        table="Relationships",
+                        columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
+                        values=rel_batch_values,
+                    )
+                logging.info(f"Batched {len(relationships_to_insert)} relationships for insertion/update.")
+
+            if instance_of_to_insert:
+                for inst_batch_values in chunk_list(instance_of_to_insert, BATCH_SIZE):
+                    batch.insert_or_update(
+                        table="InstanceOf",
+                        columns=("InstanceEid", "ClassEid"),
+                        values=inst_batch_values,
+                    )
+                logging.info(f"Batched {len(instance_of_to_insert)} instance-of relationships for insertion/update.")
+        
         logging.info("Successfully committed all batches to Spanner.")
 
     except Exception as e:
