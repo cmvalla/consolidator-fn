@@ -501,7 +501,7 @@ def cluster_and_merge_entities(data, similarity_threshold=0.9):
 
     for rel in relationships:
         source_class_id = class_id_map.get(rel.get("source"))
-        target_class_id = class_id_map.get(rel.get("target") )
+        target_class_id = class_id_map.get(rel.get("target"))
         if source_class_id and target_class_id and source_class_id != target_class_id:
             new_relationships.append({
                 "source": source_class_id,
@@ -702,7 +702,7 @@ def migrate_to_spanner(data):
     valid_eids = {e["id"] for e in valid_entities}
 
     entities_to_insert = [
-        (e["id"], e["type"], json.dumps(e.get("properties", {})),
+        (e["id"], e["type"], json.dumps(e.get("properties",ப்பட்டன)),
          json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", [])))
         for e in valid_entities
     ]
@@ -817,7 +817,7 @@ def consolidator(cloud_event):
             logging.info(f"Raw Redis data for batch {batch_id}: {redis_data}")
             
             # Decode keys from bytes to strings
-            decoded_redis_data = {k.decode('utf-8'): v.decode('utf-8') for k, v in redis_data.items()}
+            decoded_redis_data = {k: v for k, v in redis_data.items()}
             logging.info(f"Decoded Redis data for batch {batch_id}: {decoded_redis_data}")
             
             entities = json.loads(decoded_redis_data["entities"])
