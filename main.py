@@ -742,59 +742,45 @@ def migrate_to_spanner(data):
 
     BATCH_SIZE = 100
 
-    if entities_to_insert:
-        for batch in chunk_list(entities_to_insert, BATCH_SIZE):
-            try:
-                spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-                    table="Entities",
-                    columns=("Eid", "Type", "Properties", "Embedding", "Communities"),
-                    values=batch,
-                ))
-                logging.info(f"Inserted/updated {len(batch)} entities.")
-            except Exception as e:
-                logging.error(f"Error inserting batch into Entities table: {e}", exc_info=True)
-                if hasattr(e, 'details'):
-                    logging.error(f"  Details: {e.details}")
-                logging.error(f"Failing batch (first 5 entities): {batch[:5]}")
-                raise e
+    try:
+        with spanner_database.batch() as batch:
+            if entities_to_insert:
+                for entity_batch_values in chunk_list(entities_to_insert, BATCH_SIZE):
+                    batch.insert_or_update(
+                        table="Entities",
+                        columns=("Eid", "Type", "Properties", "Embedding", "Communities"),
+                        values=entity_batch_values,
+                    )
+                logging.info(f"Batched {len(entities_to_insert)} entities for insertion/update.")
 
-    if relationships_to_insert:
-        for batch in chunk_list(relationships_to_insert, BATCH_SIZE):
-            try:
-                spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-                    table="Relationships",
-                    columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
-                    values=batch,
-                ))
-                logging.info(f"Inserted/updated {len(batch)} relationships.")
-            except Exception as e:
-                logging.error(f"Error inserting batch into Relationships table: {e}", exc_info=True)
-                if hasattr(e, 'details'):
-                    logging.error(f"  Details: {e.details()}")
-                logging.error("Failing Rids for Relationships table:")
-                for row in batch:
-                    logging.error(f"  - Rid: {row[0]}")
-                raise e
+            if relationships_to_insert:
+                for rel_batch_values in chunk_list(relationships_to_insert, BATCH_SIZE):
+                    batch.insert_or_update(
+                        table="Relationships",
+                        columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
+                        values=rel_batch_values,
+                    )
+                logging.info(f"Batched {len(relationships_to_insert)} relationships for insertion/update.")
 
-    if instance_of_to_insert:
-        for batch in chunk_list(instance_of_to_insert, BATCH_SIZE):
-            try:
-                spanner_database.run_in_transaction(lambda transaction: transaction.insert_or_update(
-                    table="InstanceOf",
-                    columns=("InstanceEid", "ClassEid"),
-                    values=batch,
-                ))
-                logging.info(f"Inserted/updated {len(batch)} instance-of relationships.")
-            except Exception as e:
-                logging.error(f"Error inserting batch into InstanceOf table: {e}", exc_info=True)
-                if hasattr(e, 'details'):
-                    logging.error(f"  Details: {e.details()}")
-                logging.error("Failing Eids for InstanceOf table:")
-                for row in batch:
-                    logging.error(f"  - InstanceEid: {row[0]}, ClassEid: {row[1]}")
-                raise e
+            if instance_of_to_insert:
+                for inst_batch_values in chunk_list(instance_of_to_insert, BATCH_SIZE):
+                    batch.insert_or_update(
+                        table="InstanceOf",
+                        columns=("InstanceEid", "ClassEid"),
+                        values=inst_batch_values,
+                    )
+                logging.info(f"Batched {len(instance_of_to_insert)} instance-of relationships for insertion/update.")
+        
+        logging.info("Successfully committed all batches to Spanner.")
+
+    except Exception as e:
+        logging.error(f"Error during Spanner batch commit: {e}", exc_info=True)
+        if hasattr(e, 'details'):
+            logging.error(f"  Details: {e.details}")
+        raise e
 
     return data
+
 
 # --- LangChain Sequence ---
 
