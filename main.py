@@ -787,6 +787,7 @@ def migrate_to_spanner(data):
 
 
 
+
 # --- LangChain Sequence ---
 
 # Define the processing chain, starting from aggregation
