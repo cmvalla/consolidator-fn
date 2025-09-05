@@ -702,8 +702,8 @@ def migrate_to_spanner(data):
     valid_eids = {e["id"] for e in valid_entities}
 
     entities_to_insert = [
-        (e["id"], e["type"], json.dumps(e.get("properties", {})
-        ), json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", [])))
+        (e["id"], e["type"], json.dumps(e.get("properties", {})),
+         json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", [])))
         for e in valid_entities
     ]
 
@@ -754,10 +754,8 @@ def migrate_to_spanner(data):
             except Exception as e:
                 logging.error(f"Error inserting batch into Entities table: {e}", exc_info=True)
                 if hasattr(e, 'details'):
-                    logging.error(f"  Details: {e.details()}")
-                logging.error("Failing entity IDs for Entities table:")
-                for row in batch:
-                    logging.error(f"  - entity_id: {row[0]}")
+                    logging.error(f"  Details: {e.details}")
+                logging.error(f"Failing batch (first 5 entities): {batch[:5]}")
                 raise e
 
     if relationships_to_insert:
