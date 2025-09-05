@@ -702,7 +702,7 @@ def migrate_to_spanner(data):
     valid_eids = {e["id"] for e in valid_entities}
 
     entities_to_insert = [
-        (e["id"], e["type"], json.dumps(e.get("properties",ப்பட்டன)),
+        (e["id"], e["type"], json.dumps(e.get("properties", {})),
          json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", [])))
         for e in valid_entities
     ]
@@ -780,6 +780,7 @@ def migrate_to_spanner(data):
         raise e
 
     return data
+
 
 
 # --- LangChain Sequence ---
