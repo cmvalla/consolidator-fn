@@ -10,7 +10,7 @@ langsmith==0.4.16
 google-cloud-secret-manager==2.24.0
 google-cloud-spanner==3.57.0
 sqlalchemy
-sqlalchemy-google-spanner
+sqlalchemy-spanner
 psutil>=5.9.0
 requests
 scikit-learn
