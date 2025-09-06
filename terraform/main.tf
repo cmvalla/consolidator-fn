@@ -82,6 +82,10 @@ resource "google_cloud_run_v2_service" "consolidator" {
           value = var.use_gemini_embeddings 
         }
         env {
+          name = "GEMINI_API_KEY_SECRET_ID"
+          value = var.gemini_api_key_secret_id
+        }
+        env {
           name  = "EMBEDDING_SERVICE_URL"
           value = data.google_cloud_run_v2_service.embedding_service.uri
         }

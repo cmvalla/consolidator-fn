@@ -18,7 +18,45 @@ from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence, RunnablePassthrough
 import google.cloud.secretmanager as secretmanager
 import time
-import google.cloud.spanner_v1 as spanner
+
+from sqlalchemy import create_engine, Column, String, JSON, ForeignKey, TIMESTAMP, func, Float
+from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.dialects.google.spanner import ARRAY
+
+Base = declarative_base()
+
+class Entity(Base):
+    __tablename__ = "Entities"
+    Eid = Column(String, primary_key=True)
+    Type = Column(String)
+    Properties = Column(JSON)
+    Embedding = Column(ARRAY(Float))
+    Communities = Column(ARRAY(String))
+
+class Relationship(Base):
+    __tablename__ = "Relationships"
+    Rid = Column(String, primary_key=True)
+    SourceEid = Column(String, ForeignKey("Entities.Eid"))
+    TargetEid = Column(String, ForeignKey("Entities.Eid"))
+    Type = Column(String)
+    Properties = Column(JSON)
+
+class InstanceOf(Base):
+    __tablename__ = "InstanceOf"
+    InstanceEid = Column(String, ForeignKey("Entities.Eid"), primary_key=True)
+    ClassEid = Column(String, ForeignKey("Entities.Eid"), primary_key=True)
+
+class WorkflowStatus(Base):
+    __tablename__ = "WorkflowStatus"
+    BatchId = Column(String, primary_key=True)
+    Status = Column(String)
+    UpdatedAt = Column(TIMESTAMP, server_default=func.now())
+
+class Community(Base):
+    __tablename__ = "Communities"
+    CommunityId = Column(String, primary_key=True)
+    Summary = Column(String)
+    Embedding = Column(ARRAY(Float))
 import psutil
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
 import requests
@@ -36,9 +74,7 @@ logging.basicConfig(level=logging.INFO)
 redis_client = None
 llm = None
 memgraph_graph = None
-spanner_client = None
-spanner_instance = None
-spanner_database = None
+db_session = None
 
 CLUSTER_SUMMARY_PROMPT = PromptTemplate.from_template(
     "Summarize the following collection of entities into a single, coherent paragraph. "
@@ -86,19 +122,35 @@ def generate_class_eid(name):
     # Base64 encode the normalized name to ensure it is a safe string
     return base64.urlsafe_b64encode(normalized_name.encode('utf-8')).decode('utf-8').replace('=', '-')
 
-def ensure_spanner_graph_exists(database):
+def ensure_spanner_schema():
     """
-    This function is now a placeholder. The schema is managed by Terraform.
-    The DDL definition can be found in `terraform/spanner.tf`.
+    Ensures that the necessary tables, graphs, and indexes exist in Spanner by executing DDL from schema.sql.
     """
-    logging.info("Schema management is now handled by Terraform. Skipping DDL updates from the function.")
-    pass
+    try:
+        with open("schema.sql", "r") as f:
+            # Split statements by semicolon, and filter out empty ones.
+            ddl_statements = [statement.strip() for statement in f.read().split(';') if statement.strip()]
+    except FileNotFoundError:
+        logging.error("schema.sql not found. Cannot ensure Spanner schema.")
+        return
+
+    for ddl in ddl_statements:
+        try:
+            with db_session.begin():
+                db_session.execute(ddl)
+            logging.info(f"Successfully executed DDL: {ddl}")
+        except AlreadyExists:
+            logging.info(f"DDL statement already exists, skipping: {ddl}")
+        except Exception as e:
+            logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
+            # Not re-raising here to allow the function to continue if one statement fails
+            # but we should log it as an error.
 
 def initialize_clients():
     """
     Initializes all external clients.
     """
-    global redis_client, llm, spanner_client, spanner_instance, spanner_database, gemini_embeddings_client
+    global redis_client, llm, db_session, gemini_embeddings_client
 
     try:
         # Log system resource usage
@@ -143,15 +195,25 @@ def initialize_clients():
         
 
         logging.info("Initializing Vertex AI...")
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", convert_system_message_to_human=True)
+        GEMINI_API_KEY_SECRET_ID = os.environ.get("GEMINI_API_KEY_SECRET_ID")
+        gemini_api_key = None
+        if GEMINI_API_KEY_SECRET_ID:
+            try:
+                gemini_api_key = sm_client.access_secret_version(request={"name": GEMINI_API_KEY_SECRET_ID}).payload.data.decode("UTF-8")
+                logging.info("Successfully retrieved Gemini API key from Secret Manager.")
+            except Exception as e:
+                logging.warning(f"Could not retrieve Gemini API key from Secret Manager: {e}")
+
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", convert_system_message_to_human=True, google_api_key=gemini_api_key)
         logging.info("Vertex AI clients initialized successfully.")
 
-        logging.info("Initializing Spanner client...")
-        spanner_client = spanner.Client(project=GCP_PROJECT)
-        spanner_instance = spanner_client.instance(SPANNER_INSTANCE_ID)
-        spanner_database = spanner_instance.database(SPANNER_DATABASE_ID)
-        logging.info(f"Spanner client configured for project: {spanner_client.project}, instance: {spanner_instance.instance_id}, database: {spanner_database.database_id}")
-        logging.info("Spanner client initialized successfully.")
+        logging.info("Initializing Spanner client with SQLAlchemy...")
+        db_uri = f"spanner:///projects/{GCP_PROJECT}/instances/{SPANNER_INSTANCE_ID}/databases/{SPANNER_DATABASE_ID}"
+        engine = create_engine(db_uri)
+        Session = sessionmaker(bind=engine)
+        db_session = Session()
+        logging.info("SQLAlchemy session for Spanner initialized successfully.")
+        ensure_spanner_schema()
 
         
 
@@ -688,8 +750,8 @@ def run_igraph_community_detection(data):
     return data
 
 def migrate_to_spanner(data):
-    """Migrates the final graph data to Cloud Spanner, with robust filtering and error logging."""
-    logging.info("Migrating data to Spanner...")
+    """Migrates the final graph data to Cloud Spanner using SQLAlchemy."""
+    logging.info("Migrating data to Spanner with SQLAlchemy...")
     
     entities = data.get("entities", [])
     relationships = data.get("relationships", [])
@@ -700,12 +762,6 @@ def migrate_to_spanner(data):
         logging.warning(f"Filtered out {len(entities) - len(valid_entities)} entities with invalid IDs.")
 
     valid_eids = {e["id"] for e in valid_entities}
-
-    entities_to_insert = [
-        (e["id"], e["type"], json.dumps(e.get("properties", {})),
-         json.dumps(e.get("embedding", [])), json.dumps(e.get("communities", [])))
-        for e in valid_entities
-    ]
 
     def is_valid_rel(r):
         source = r.get("source")
@@ -718,68 +774,56 @@ def migrate_to_spanner(data):
     if len(valid_relationships) != len(relationships):
         logging.warning(f"Filtered out {len(relationships) - len(valid_relationships)} relationships with invalid or dangling EIDs.")
 
-    relationships_to_insert = [
-        (
-            hashlib.sha256(f"{r['source']}-{r['target']}-{r.get('type')}".encode()).hexdigest(),
-            r["source"],
-            r["target"],
-            r.get("type"),
-            json.dumps(r.get("properties", {}))
-        )
-        for r in valid_relationships
-        if r.get('type') != 'INSTANCE_OF'
-    ]
-    instance_of_to_insert = [
-        (r["source"], r["target"])
-        for r in valid_relationships
-        if r.get('type') == 'INSTANCE_OF'
-    ]
-    # --- End of Filtering ---
-
-    def chunk_list(lst, n):
-        for i in range(0, len(lst), n):
-            yield lst[i:i + n]
-
-    BATCH_SIZE = 100
-
     try:
-        with spanner_database.batch() as batch:
-            if entities_to_insert:
-                for entity_batch_values in chunk_list(entities_to_insert, BATCH_SIZE):
-                    batch.insert_or_update(
-                        table="Entities",
-                        columns=("Eid", "Type", "Properties", "Embedding", "Communities"),
-                        values=entity_batch_values,
-                    )
-                logging.info(f"Batched {len(entities_to_insert)} entities for insertion/update.")
+        with db_session.begin():
+            # Upsert entities
+            for e in valid_entities:
+                entity = Entity(
+                    Eid=e["id"],
+                    Type=e["type"],
+                    Properties=e.get("properties", {}),
+                    Embedding=e.get("embedding", []),
+                    Communities=e.get("communities", [])
+                )
+                db_session.merge(entity)
+            logging.info(f"Merged {len(valid_entities)} entities.")
 
-            if relationships_to_insert:
-                for rel_batch_values in chunk_list(relationships_to_insert, BATCH_SIZE):
-                    batch.insert_or_update(
-                        table="Relationships",
-                        columns=("Rid", "SourceEid", "TargetEid", "Type", "Properties"),
-                        values=rel_batch_values,
-                    )
-                logging.info(f"Batched {len(relationships_to_insert)} relationships for insertion/update.")
+            # Upsert relationships
+            rels_to_upsert = [
+                Relationship(
+                    Rid=hashlib.sha256(f"{r['source']}-{r['target']}-{r.get('type')}".encode()).hexdigest(),
+                    SourceEid=r["source"],
+                    TargetEid=r["target"],
+                    Type=r.get("type"),
+                    Properties=r.get("properties", {})
+                )
+                for r in valid_relationships if r.get('type') != 'INSTANCE_OF'
+            ]
+            for rel in rels_to_upsert:
+                db_session.merge(rel)
+            logging.info(f"Merged {len(rels_to_upsert)} relationships.")
 
-            if instance_of_to_insert:
-                for inst_batch_values in chunk_list(instance_of_to_insert, BATCH_SIZE):
-                    batch.insert_or_update(
-                        table="InstanceOf",
-                        columns=("InstanceEid", "ClassEid"),
-                        values=inst_batch_values,
-                    )
-                logging.info(f"Batched {len(instance_of_to_insert)} instance-of relationships for insertion/update.")
-        
-        logging.info("Successfully committed all batches to Spanner.")
+            # Upsert InstanceOf relationships
+            instance_of_to_upsert = [
+                InstanceOf(
+                    InstanceEid=r["source"],
+                    ClassEid=r["target"]
+                )
+                for r in valid_relationships if r.get('type') == 'INSTANCE_OF'
+            ]
+            for inst in instance_of_to_upsert:
+                db_session.merge(inst)
+            logging.info(f"Merged {len(instance_of_to_upsert)} instance-of relationships.")
+
+        logging.info("Successfully committed all changes to Spanner.")
 
     except Exception as e:
-        logging.error(f"Error during Spanner batch commit: {e}", exc_info=True)
-        if hasattr(e, 'details'):
-            logging.error(f"  Details: {e.details}")
+        logging.error(f"Error during Spanner session commit: {e}", exc_info=True)
+        db_session.rollback()
         raise e
 
     return data
+
 
 
 
@@ -841,12 +885,14 @@ def consolidator(cloud_event):
             logging.info(f"Successfully migrated data from Redis to Spanner for batch {batch_id}.")
             
             # Update workflow status to SUCCEEDED
-            with spanner_database.batch() as batch:
-                batch.update(
-                    table="WorkflowStatus",
-                    columns=("BatchId", "Status", "UpdatedAt"),
-                    values=[(batch_id, "SUCCEEDED", spanner.COMMIT_TIMESTAMP)],
-                )
+            with db_session.begin():
+                workflow_status = db_session.query(WorkflowStatus).filter_by(BatchId=batch_id).first()
+                if workflow_status:
+                    workflow_status.Status = "SUCCEEDED"
+                    workflow_status.UpdatedAt = func.now()
+                else:
+                    workflow_status = WorkflowStatus(BatchId=batch_id, Status="SUCCEEDED")
+                    db_session.add(workflow_status)
             logging.info(f"Successfully updated workflow status for batch ID {batch_id} to SUCCEEDED (from Redis)." )
             return "OK", 200
 
@@ -861,12 +907,14 @@ def consolidator(cloud_event):
         
         # If everything is successful, update the status to SUCCEEDED
         if batch_id:
-            with spanner_database.batch() as batch:
-                batch.update(
-                    table="WorkflowStatus",
-                    columns=("BatchId", "Status", "UpdatedAt"),
-                    values=[(batch_id, "SUCCEEDED", spanner.COMMIT_TIMESTAMP)],
-                )
+            with db_session.begin():
+                workflow_status = db_session.query(WorkflowStatus).filter_by(BatchId=batch_id).first()
+                if workflow_status:
+                    workflow_status.Status = "SUCCEEDED"
+                    workflow_status.UpdatedAt = func.now()
+                else:
+                    workflow_status = WorkflowStatus(BatchId=batch_id, Status="SUCCEEDED")
+                    db_session.add(workflow_status)
             logging.info(f"Successfully updated workflow status for batch ID {batch_id} to SUCCEEDED.")
 
         return "OK", 200
@@ -877,12 +925,14 @@ def consolidator(cloud_event):
         # If an error occurs, update the status to FAILED
         if batch_id:
             try:
-                with spanner_database.batch() as batch:
-                    batch.update(
-                        table="WorkflowStatus",
-                        columns=("BatchId", "Status", "UpdatedAt"),
-                        values=[(batch_id, "FAILED", spanner.COMMIT_TIMESTAMP)],
-                    )
+                with db_session.begin():
+                    workflow_status = db_session.query(WorkflowStatus).filter_by(BatchId=batch_id).first()
+                    if workflow_status:
+                        workflow_status.Status = "FAILED"
+                        workflow_status.UpdatedAt = func.now()
+                    else:
+                        workflow_status = WorkflowStatus(BatchId=batch_id, Status="FAILED")
+                        db_session.add(workflow_status)
                 logging.info(f"Successfully updated workflow status for batch ID {batch_id} to FAILED.")
             except Exception as spanner_e:
                 logging.error(f"Could not update workflow status for batch ID {batch_id} to FAILED: {spanner_e}", exc_info=True)

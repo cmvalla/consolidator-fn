@@ -111,3 +111,9 @@ variable "use_gemini_embeddings" {
   type        = bool
   default     = false
 }
+
+variable "gemini_api_key_secret_id" {
+  description = "The secret ID for the Gemini API key."
+  type        = string
+  default     = ""
+}
