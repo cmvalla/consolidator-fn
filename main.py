@@ -864,7 +864,7 @@ def consolidator(cloud_event):
             redis_data = redis_client.hgetall(consolidated_key)
             logging.info(f"Raw Redis data for batch {batch_id}: {redis_data}")
             
-            # Decode keys from bytes to strings
+            # The keys are already decoded by the redis client (decode_responses=True)
             decoded_redis_data = {k: v for k, v in redis_data.items()}
             logging.info(f"Decoded Redis data for batch {batch_id}: {decoded_redis_data}")
             

@@ -28,6 +28,15 @@ resource "google_cloud_run_v2_service" "consolidator" {
         ports {
           container_port = 8080
         }
+        startup_probe = {
+          initial_delay_seconds = 0
+          timeout_seconds     = 600
+          period_seconds      = 240
+          failure_threshold   = 1
+          tcp_socket = {
+            port = 8080
+          }
+        }
         env {
           name  = "GOOGLE_CLOUD_PROJECT"
           value = var.project_id
