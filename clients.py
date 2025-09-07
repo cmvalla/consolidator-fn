@@ -42,7 +42,7 @@ class ClientFactory:
 
     def get_db_session(self):
         if self._db_session is None:
-            db_uri = f"spanner:///projects/{Config.GCP_PROJECT}/instances/{Config.SPANNER_INSTANCE_ID}/databases/{Config.SPANNER_DATABASE_ID}"
+            db_uri = f"spanner+spanner:///projects/{Config.GCP_PROJECT}/instances/{Config.SPANNER_INSTANCE_ID}/databases/{Config.SPANNER_DATABASE_ID}"
             engine = create_engine(db_uri)
             Session = sessionmaker(bind=engine)
             self._db_session = Session()
