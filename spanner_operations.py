@@ -3,12 +3,13 @@ import logging
 import hashlib
 import re
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
-from models import Entity, Relationship, InstanceOf, WorkflowStatus
+from models import Entity, Relationship, InstanceOf, WorkflowStatus, Base
 from sqlalchemy import func, text
 
 class SpannerOperations:
-    def __init__(self, db_session):
+    def __init__(self, db_session, engine):
         self.db_session = db_session
+        self.engine = engine
 
     def _table_exists(self, table_name):
         query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{table_name}'")
@@ -27,11 +28,23 @@ class SpannerOperations:
 
     def ensure_spanner_schema(self):
         """
-        Ensures that the necessary tables, graphs, and indexes exist in Spanner by executing DDL from schema.sql.
+        Ensures that the necessary tables, graphs, and indexes exist in Spanner.
+        Tables are created using SQLAlchemy ORM. Spanner-specific DDL (graphs, vector indexes)
+        are executed conditionally.
         """
+        logging.info("Ensuring Spanner schema...")
+
+        # 1. Create tables using SQLAlchemy ORM
+        try:
+            Base.metadata.create_all(self.engine)
+            logging.info("SQLAlchemy ORM tables ensured.")
+        except Exception as e:
+            logging.error(f"Error creating tables with SQLAlchemy ORM: {e}", exc_info=True)
+            # Continue, as some tables might exist and we need to handle other DDL
+
+        # 2. Execute Spanner-specific DDL from schema.sql conditionally
         try:
             with open("schema.sql", "r") as f:
-                # Split statements by semicolon, and filter out empty ones.
                 ddl_statements = [statement.strip() for statement in f.read().split(';') if statement.strip()]
         except FileNotFoundError:
             logging.error("schema.sql not found. Cannot ensure Spanner schema.")
@@ -41,21 +54,21 @@ class SpannerOperations:
             ddl_type = None
             ddl_name = None
 
-            # Try to parse CREATE TABLE
+            # Try to parse CREATE TABLE (already handled by ORM, but might be in schema.sql)
             match = re.match(r"CREATE TABLE (\w+)", ddl, re.IGNORECASE)
             if match:
                 ddl_type = "TABLE"
                 ddl_name = match.group(1)
             
             # Try to parse CREATE VECTOR INDEX
-            if not ddl_type: # Only try if not already matched
+            if not ddl_type:
                 match = re.match(r"CREATE VECTOR INDEX (\w+)", ddl, re.IGNORECASE)
                 if match:
                     ddl_type = "INDEX"
                     ddl_name = match.group(1)
 
             # Try to parse CREATE PROPERTY GRAPH
-            if not ddl_type: # Only try if not already matched
+            if not ddl_type:
                 match = re.match(r"CREATE PROPERTY GRAPH (\w+)", ddl, re.IGNORECASE)
                 if match:
                     ddl_type = "GRAPH"
