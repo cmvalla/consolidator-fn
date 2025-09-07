@@ -1,6 +1,7 @@
 # Spanner operations for the consolidator function
 import logging
 import hashlib
+import re
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
 from models import Entity, Relationship, InstanceOf, WorkflowStatus
 from sqlalchemy import func, text
@@ -8,6 +9,21 @@ from sqlalchemy import func, text
 class SpannerOperations:
     def __init__(self, db_session):
         self.db_session = db_session
+
+    def _table_exists(self, table_name):
+        query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{table_name}'")
+        result = self.db_session.execute(query).scalar()
+        return result == 1
+
+    def _index_exists(self, index_name):
+        query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME = '{index_name}'")
+        result = self.db_session.execute(query).scalar()
+        return result == 1
+
+    def _graph_exists(self, graph_name):
+        query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.PROPERTY_GRAPH_METADATA WHERE PROPERTY_GRAPH_NAME = '{graph_name}'")
+        result = self.db_session.execute(query).scalar()
+        return result == 1
 
     def ensure_spanner_schema(self):
         """
@@ -22,14 +38,52 @@ class SpannerOperations:
             return
 
         for ddl in ddl_statements:
-            try:
-                with self.db_session.begin():
-                    self.db_session.execute(text(ddl))
-                logging.info(f"Successfully executed DDL: {ddl}")
-            except (AlreadyExists, FailedPrecondition):
-                logging.info(f"DDL statement already exists, skipping: {ddl}")
-            except Exception as e:
-                logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
+            ddl_type = None
+            ddl_name = None
+
+            # Try to parse CREATE TABLE
+            match = re.match(r"CREATE TABLE (\w+)", ddl, re.IGNORECASE)
+            if match:
+                ddl_type = "TABLE"
+                ddl_name = match.group(1)
+            
+            # Try to parse CREATE VECTOR INDEX
+            if not ddl_type: # Only try if not already matched
+                match = re.match(r"CREATE VECTOR INDEX (\w+)", ddl, re.IGNORECASE)
+                if match:
+                    ddl_type = "INDEX"
+                    ddl_name = match.group(1)
+
+            # Try to parse CREATE PROPERTY GRAPH
+            if not ddl_type: # Only try if not already matched
+                match = re.match(r"CREATE PROPERTY GRAPH (\w+)", ddl, re.IGNORECASE)
+                if match:
+                    ddl_type = "GRAPH"
+                    ddl_name = match.group(1)
+
+            should_execute = True
+            if ddl_type and ddl_name:
+                if ddl_type == "TABLE" and self._table_exists(ddl_name):
+                    logging.info(f"Table '{ddl_name}' already exists, skipping DDL.")
+                    should_execute = False
+                elif ddl_type == "INDEX" and self._index_exists(ddl_name):
+                    logging.info(f"Index '{ddl_name}' already exists, skipping DDL.")
+                    should_execute = False
+                elif ddl_type == "GRAPH" and self._graph_exists(ddl_name):
+                    logging.info(f"Property Graph '{ddl_name}' already exists, skipping DDL.")
+                    should_execute = False
+            
+            if should_execute:
+                try:
+                    with self.db_session.begin():
+                        self.db_session.execute(text(ddl))
+                    logging.info(f"Successfully executed DDL: {ddl}")
+                except (AlreadyExists, FailedPrecondition) as e:
+                    logging.info(f"DDL statement already exists or failed precondition, skipping: {ddl} - Error: {e}")
+                except Exception as e:
+                    logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
+            else:
+                logging.info(f"DDL statement for '{ddl_name}' skipped as it already exists.")
 
     def migrate_to_spanner(self, data):
         """Migrates the final graph data to Cloud Spanner using SQLAlchemy."""
