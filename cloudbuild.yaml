@@ -10,8 +10,8 @@ steps:
     docker pull ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest || true
 
     # Build the new image, using the pulled image as a cache
-    # IMPORTANT: Do NOT add --no-cache here, as it prevents effective layer caching.
-    docker build \
+<<<<<<< HEAD
+    docker build --no-cache \
       --cache-from ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest \
       --tag ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID \
       --tag ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest \
