@@ -10,51 +10,8 @@ steps:
     docker pull ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest || true
 
     # Build the new image, using the pulled image as a cache
-<<<<<<< HEAD
-    docker build --no-cache \
+docker build --no-cache \
       --cache-from ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest \
       --tag ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID \
       --tag ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest \
       .
-    
-    # Push all tags for the newly built image
-    docker push ${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME} --all-tags
-
-# Step 2A: Deploy the service
-- name: '${LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/gcp-terraform-build:latest'
-  id: deploy
-  entrypoint: sh
-  args:
-  - '-c'
-  - |
-    gcloud secrets versions access latest --secret="consolidator-tfvars" --project="${_PROJECT_ID}" > terraform/terraform.tfvars
-    cd terraform
-    terraform init -backend-config="prefix=cloud-spanner-demo/${_PROJECT_SUFFIX}/consolidator"
-    terraform apply -auto-approve -var="image_tag=$BUILD_ID" -var="image_url=${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}"
-  waitFor: ['build-and-push']
-
-# Step 2B: Clean up old images (runs in parallel with deploy)
-- name: '${LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/gcp-terraform-build:latest'
-  id: cleanup-images
-  entrypoint: bash
-  args:
-  - 'cleanup_images.sh'
-  - '${_LOCATION}'
-  - '${_PROJECT_ID}'
-  - '${_REPOSITORY_ID}'
-  - '${_IMAGE_NAME}'
-  waitFor: ['build-and-push']
-
-images:
-- '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:$BUILD_ID'
-- '${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}:latest'
-
-options:
-  logging: CLOUD_LOGGING_ONLY
-
-substitutions:
-  _PROJECT_ID: '${PROJECT_ID}'
-  _LOCATION: 'europe-west1'
-  _REPOSITORY_ID: 'my-docker-repo'
-  _IMAGE_NAME: 'graphrag-fn-consolidator'
-  _PROJECT_SUFFIX: '' # This will be overridden by the trigger
