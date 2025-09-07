@@ -4,7 +4,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
   location = var.location
   deletion_protection = false
   ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
-  launch_stage = "BETA"
+
 
   template {
     service_account = var.consolidator_sa_email
@@ -26,16 +26,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
             "cpu": "1"
           }
         }
-        startup_probe {
-          http_get {
-            port = 8080
-            path = "/"
-          }
-          initial_delay_seconds = 0
-          timeout_seconds       = 600 # Increased timeout for startup
-          period_seconds        = 10
-          failure_threshold     = 1
-        }
+        
        
         
         
