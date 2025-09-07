@@ -151,7 +151,7 @@ class GraphProcessor:
                             class_id_map[member_id] = existing_class_eid
                         logging.info(f"Merged cluster into existing class '{class_name}' (ID: {existing_class_eid})")
                     else:
-                        summary = summarization_chain.invoke({"cluster_text": cluster_info["cluster_text"]}).get("text")
+                        summary = summarization_chain.invoke({"text_chunk": cluster_info["cluster_text"]}).get("text")
                         embedding = self.llm_ops.get_embedding(summary, class_eid)
                         class_entity = {
                             "id": class_eid,
