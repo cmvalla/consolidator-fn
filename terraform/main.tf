@@ -32,7 +32,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
             path = "/"
           }
           initial_delay_seconds = 0
-          timeout_seconds       = 240 # Increased timeout for startup
+          timeout_seconds       = 600 # Increased timeout for startup
           period_seconds        = 10
           failure_threshold     = 1
         }
