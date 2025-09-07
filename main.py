@@ -110,3 +110,25 @@ def consolidator(cloud_event):
                 logging.error(f"Could not update workflow status for batch ID {batch_id} to FAILED: {spanner_e}", exc_info=True)
 
         return "Internal Server Error", 500
+
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_health_check_server():
+    port = int(os.environ.get("PORT", 8080))
+    server_address = ('', port)
+    httpd = HTTPServer(server_address, HealthCheckHandler)
+    logging.info(f"Health check server listening on port {port}")
+    httpd.serve_forever()
+
+# Start the health check server in a separate thread
+health_check_thread = threading.Thread(target=run_health_check_server)
+health_check_thread.daemon = True
+health_check_thread.start()
