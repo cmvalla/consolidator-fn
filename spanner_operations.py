@@ -5,6 +5,7 @@ import re
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
 from models import Entity, Relationship, InstanceOf, WorkflowStatus, Base
 from sqlalchemy import func, text
+from sqlalchemy.orm import sessionmaker
 
 class SpannerOperations:
     def __init__(self, db_session, engine):
@@ -12,19 +13,34 @@ class SpannerOperations:
         self.engine = engine
 
     def _table_exists(self, table_name):
-        query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{table_name}'")
-        result = self.db_session.connection().execution_options(isolation_level="AUTOCOMMIT").execute(query).scalar()
-        return result == 1
+        ReadOnlySession = sessionmaker(bind=self.engine)
+        read_only_session = ReadOnlySession()
+        try:
+            query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{table_name}'")
+            result = read_only_session.execute(query).scalar()
+            return result == 1
+        finally:
+            read_only_session.close()
 
     def _index_exists(self, index_name):
-        query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME = '{index_name}'")
-        result = self.db_session.connection().execution_options(isolation_level="AUTOCOMMIT").execute(query).scalar()
-        return result == 1
+        ReadOnlySession = sessionmaker(bind=self.engine)
+        read_only_session = ReadOnlySession()
+        try:
+            query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME = '{index_name}'")
+            result = read_only_session.execute(query).scalar()
+            return result == 1
+        finally:
+            read_only_session.close()
 
     def _graph_exists(self, graph_name):
-        query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.PROPERTY_GRAPH_METADATA WHERE PROPERTY_GRAPH_NAME = '{graph_name}'")
-        result = self.db_session.connection().execution_options(isolation_level="AUTOCOMMIT").execute(query).scalar()
-        return result == 1
+        ReadOnlySession = sessionmaker(bind=self.engine)
+        read_only_session = ReadOnlySession()
+        try:
+            query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.PROPERTY_GRAPH_METADATA WHERE PROPERTY_GRAPH_NAME = '{graph_name}'")
+            result = read_only_session.execute(query).scalar()
+            return result == 1
+        finally:
+            read_only_session.close()
 
     def ensure_spanner_schema(self):
         """
