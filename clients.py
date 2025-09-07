@@ -37,7 +37,7 @@ class ClientFactory:
                 except Exception as e:
                     # log the error
                     pass
-            self._llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", convert_system_message_to_human=True, google_api_key=gemini_api_key)
+            self._llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
         return self._llm
 
     def get_db_session(self):
