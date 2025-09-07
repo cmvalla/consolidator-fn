@@ -11,4 +11,4 @@ COPY . .
 EXPOSE 8080 
 
 # Define the command to run the application
-ENTRYPOINT ["functions-framework", "--target", "consolidator", "--port", "8080"]
+ENTRYPOINT ["python", "-m", "functions_framework", "--target", "consolidator", "--port", "8080"]
