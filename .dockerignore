@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.git/
+.gitignore
+.gitmodules
+*.log
+*.tmp
+*.egg-info/
+dist/
+build/
+run_local.sh
+start_server.sh
+test_server.sh

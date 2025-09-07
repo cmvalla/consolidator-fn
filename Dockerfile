@@ -19,3 +19,4 @@ EXPOSE 8080
 
 # Define the command to run the application
 CMD ["functions-framework", "--target=consolidator", "--source=main.py"]
+
