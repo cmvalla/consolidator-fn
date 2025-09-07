@@ -18,4 +18,4 @@ COPY . .
 EXPOSE 8080 
 
 # Define the command to run the application
-CMD ["/bin/bash", "-c", "functions-framework --target=consolidator --source=main.py 2>&1 | tee /dev/stderr"]
+CMD ["/bin/bash", "-c", "functions-framework --target=consolidator --source=main.py > /tmp/startup.log 2>&1 ; cat /tmp/startup.log"]
