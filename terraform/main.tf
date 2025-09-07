@@ -3,6 +3,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
   name     = "consolidator-fn"
   location = var.location
   deletion_protection = false
+  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   template {
     service_account = var.consolidator_sa_email
