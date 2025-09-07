@@ -40,6 +40,8 @@ def aggregate_results(data):
 @functions_framework.cloud_event
 def consolidator(cloud_event):
     batch_id = None
+    if cloud_event.data.get("path") == "/":
+        return "OK", 200
     try:
         # Log system resource usage
         cpu_usage = psutil.cpu_percent(interval=1)
