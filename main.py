@@ -101,8 +101,8 @@ def consolidator(cloud_event):
         if batch_id:
             try:
                 client_factory = ClientFactory()
-                db_session = client_factory.get_db_session()
-                spanner_ops = SpannerOperations(db_session)
+                db_session, db_engine = client_factory.get_db_session()
+                spanner_ops = SpannerOperations(db_session, db_engine)
                 spanner_ops.update_workflow_status(batch_id, "FAILED")
             except Exception as spanner_e:
                 logging.error(f"Could not update workflow status for batch ID {batch_id} to FAILED: {spanner_e}", exc_info=True)

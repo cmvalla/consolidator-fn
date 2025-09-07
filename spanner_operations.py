@@ -13,17 +13,17 @@ class SpannerOperations:
 
     def _table_exists(self, table_name):
         query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{table_name}'")
-        result = self.db_session.execute(query).scalar()
+        result = self.engine.connect().execute(query).scalar()
         return result == 1
 
     def _index_exists(self, index_name):
         query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME = '{index_name}'")
-        result = self.db_session.execute(query).scalar()
+        result = self.engine.connect().execute(query).scalar()
         return result == 1
 
     def _graph_exists(self, graph_name):
         query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.PROPERTY_GRAPH_METADATA WHERE PROPERTY_GRAPH_NAME = '{graph_name}'")
-        result = self.db_session.execute(query).scalar()
+        result = self.engine.connect().execute(query).scalar()
         return result == 1
 
     def ensure_spanner_schema(self):
