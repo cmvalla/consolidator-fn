@@ -1,7 +1,7 @@
 # Spanner operations for the consolidator function
 import logging
 import hashlib
-from google.api_core.exceptions import AlreadyExists
+from google.api_core.exceptions import AlreadyExists, FailedPrecondition
 from models import Entity, Relationship, InstanceOf, WorkflowStatus
 from sqlalchemy import func, text
 
@@ -26,7 +26,7 @@ class SpannerOperations:
                 with self.db_session.begin():
                     self.db_session.execute(text(ddl))
                 logging.info(f"Successfully executed DDL: {ddl}")
-            except AlreadyExists:
+            except (AlreadyExists, FailedPrecondition):
                 logging.info(f"DDL statement already exists, skipping: {ddl}")
             except Exception as e:
                 logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
