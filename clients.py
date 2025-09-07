@@ -1,5 +1,5 @@
 # Client factory for the consolidator function
-import sqlalchemy_spanner
+
 import redis
 import google.cloud.secretmanager as secretmanager
 from sqlalchemy import create_engine

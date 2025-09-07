@@ -11,4 +11,4 @@ COPY . .
 EXPOSE 8080 
 
 # Define the command to run the application
-CMD ["python", "-c", "import sys; print('Hello from bare Python', file=sys.stderr); sys.exit(0)"]
+ENTRYPOINT ["functions-framework", "--target", "consolidator", "--port", "8080"]
