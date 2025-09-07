@@ -4,13 +4,6 @@ FROM python:3.11-slim
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy the requirements file first to leverage Docker layer caching
-COPY requirements.txt .
-
-# Install any needed packages specified in requirements.txt
-# This command runs in a separate layer and will be cached
-RUN pip install --no-cache-dir -r requirements.txt
-
 # Copy the rest of the application code
 COPY . .
 
@@ -18,4 +11,4 @@ COPY . .
 EXPOSE 8080 
 
 # Define the command to run the application
-CMD ["/bin/bash", "-c", "functions-framework --target=consolidator --source=main.py > /tmp/startup.log 2>&1 ; cat /tmp/startup.log"]
+CMD ["python", "-c", "import sys; print('Hello from bare Python', file=sys.stderr); sys.exit(0)"]
