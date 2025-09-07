@@ -22,6 +22,12 @@ resource "google_cloud_run_v2_service" "consolidator" {
       type    = "google.cloud.pubsub.topic.v1.messagePublished"
       service_account = var.consolidator_sa_email
     }
+
+    event_trigger {
+      trigger = google_eventarc_trigger.consolidator_trigger.name
+      type    = "google.cloud.pubsub.topic.v1.messagePublished"
+      service_account = var.consolidator_sa_email
+    }
     containers {
         image = "${var.image_url}:${var.image_tag}"
         resources {
