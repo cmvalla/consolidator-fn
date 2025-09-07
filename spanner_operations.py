@@ -3,7 +3,7 @@ import logging
 import hashlib
 from google.api_core.exceptions import AlreadyExists
 from models import Entity, Relationship, InstanceOf, WorkflowStatus
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 class SpannerOperations:
     def __init__(self, db_session):
@@ -24,7 +24,7 @@ class SpannerOperations:
         for ddl in ddl_statements:
             try:
                 with self.db_session.begin():
-                    self.db_session.execute(ddl)
+                    self.db_session.execute(text(ddl))
                 logging.info(f"Successfully executed DDL: {ddl}")
             except AlreadyExists:
                 logging.info(f"DDL statement already exists, skipping: {ddl}")
