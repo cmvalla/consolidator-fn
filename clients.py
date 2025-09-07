@@ -13,6 +13,7 @@ class ClientFactory:
         self._redis_client = None
         self._llm = None
         self._db_session = None
+        self._db_engine = None
         self._sm_client = None
 
     def get_sm_client(self):
@@ -46,4 +47,5 @@ class ClientFactory:
             engine = create_engine(db_uri)
             Session = sessionmaker(bind=engine)
             self._db_session = Session()
-        return self._db_session
+            self._db_engine = engine
+        return self._db_session, self._db_engine

@@ -52,11 +52,11 @@ def consolidator(cloud_event):
 
         client_factory = ClientFactory()
         redis_client = client_factory.get_redis_client()
-        db_session = client_factory.get_db_session()
+        db_session, db_engine = client_factory.get_db_session()
         llm = client_factory.get_llm()
 
         redis_ops = RedisOperations(redis_client)
-        spanner_ops = SpannerOperations(db_session)
+        spanner_ops = SpannerOperations(db_session, db_engine)
         llm_ops = LLMOperations(llm)
         graph_processor = GraphProcessor(llm_ops)
         
