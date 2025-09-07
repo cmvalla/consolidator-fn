@@ -16,18 +16,6 @@ resource "google_cloud_run_v2_service" "consolidator" {
       connector = var.vpc_connector
       egress = "ALL_TRAFFIC"
     }
-
-    event_trigger {
-      trigger = google_eventarc_trigger.consolidator_trigger.name
-      type    = "google.cloud.pubsub.topic.v1.messagePublished"
-      service_account = var.consolidator_sa_email
-    }
-
-    event_trigger {
-      trigger = google_eventarc_trigger.consolidator_trigger.name
-      type    = "google.cloud.pubsub.topic.v1.messagePublished"
-      service_account = var.consolidator_sa_email
-    }
     containers {
         image = "${var.image_url}:${var.image_tag}"
         resources {
@@ -101,6 +89,11 @@ resource "google_cloud_run_v2_service" "consolidator" {
           value = data.google_cloud_run_v2_service.embedding_service.uri
         }
       }
+  }
+  event_trigger {
+    trigger = google_eventarc_trigger.consolidator_trigger.name
+    type    = "google.cloud.pubsub.topic.v1.messagePublished"
+    service_account = var.consolidator_sa_email
   }
   depends_on = [
     data.google_cloud_run_v2_service.embedding_service
