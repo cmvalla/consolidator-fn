@@ -13,34 +13,22 @@ class SpannerOperations:
         self.engine = engine
 
     def _table_exists(self, table_name):
-        ReadOnlySession = sessionmaker(bind=self.engine)
-        read_only_session = ReadOnlySession()
-        try:
+        with self.engine.connect() as connection:
             query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{table_name}'")
-            result = read_only_session.execute(query).scalar()
+            result = connection.execute(query).scalar()
             return result == 1
-        finally:
-            read_only_session.close()
 
     def _index_exists(self, index_name):
-        ReadOnlySession = sessionmaker(bind=self.engine)
-        read_only_session = ReadOnlySession()
-        try:
+        with self.engine.connect() as connection:
             query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME = '{index_name}'")
-            result = read_only_session.execute(query).scalar()
+            result = connection.execute(query).scalar()
             return result == 1
-        finally:
-            read_only_session.close()
 
     def _graph_exists(self, graph_name):
-        ReadOnlySession = sessionmaker(bind=self.engine)
-        read_only_session = ReadOnlySession()
-        try:
+        with self.engine.connect() as connection:
             query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.PROPERTY_GRAPH_METADATA WHERE PROPERTY_GRAPH_NAME = '{graph_name}'")
-            result = read_only_session.execute(query).scalar()
+            result = connection.execute(query).scalar()
             return result == 1
-        finally:
-            read_only_session.close()
 
     def ensure_spanner_schema(self):
         """
