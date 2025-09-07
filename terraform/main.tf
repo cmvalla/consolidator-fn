@@ -26,16 +26,22 @@ resource "google_cloud_run_v2_service" "consolidator" {
             "cpu": "1"
           }
         }
+        startup_probe {
+          http_get {
+            port = 8080
+            path = "/"
+          }
+          initial_delay_seconds = 0
+          timeout_seconds       = 240 # Increased timeout for startup
+          period_seconds        = 10
+          failure_threshold     = 1
+        }
        
         
         
         env {
           name  = "GOOGLE_CLOUD_PROJECT"
           value = var.project_id
-        }
-        env {
-          name  = "PORT"
-          value = "8080"
         }
         env {
           name  = "REDIS_HOST"
