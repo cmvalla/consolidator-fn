@@ -34,6 +34,10 @@ resource "google_cloud_run_v2_service" "consolidator" {
           value = var.project_id
         }
         env {
+          name  = "PORT"
+          value = "8080"
+        }
+        env {
           name  = "REDIS_HOST"
           value = var.redis_host
         }
