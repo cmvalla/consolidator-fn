@@ -71,6 +71,9 @@ class LLMOperations:
                 if response.status_code == 200:
                     embedding = response.json().get("embedding")
                     if embedding:
+                        # If the embedding is a list of lists (e.g., from batch embedding), take the first one
+                        if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
+                            embedding = embedding[0]
                         return embedding
                     else:
                         logging.warning(f"Embedding not found in response for entity: {entity_id}")
