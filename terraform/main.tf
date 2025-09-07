@@ -3,7 +3,7 @@ resource "google_cloud_run_v2_service" "consolidator" {
   name     = "consolidator-fn"
   location = var.location
   deletion_protection = false
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress = "INGRESS_TRAFFIC_ALL"
 
 
   template {
