@@ -4,6 +4,8 @@ import json
 import psutil
 import google.cloud.logging
 
+# Forced rebuild comment: 2025-09-07-4
+
 from clients import ClientFactory
 from pubsub_handler import decode_pubsub_message
 from redis_operations import RedisOperations
