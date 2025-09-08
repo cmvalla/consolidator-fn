@@ -19,7 +19,7 @@ CLASS_SCHEMA = {
         "description": {"type": "string", "description": "A paragraph that summarizes the common theme and purpose of the instances."},
         "properties": {
             "type": "object",
-            "description": "An object representing the common schema of the instances. Keys should reflect common properties, and values should be a representative value or type (e.g., 'string', 'integer', 'boolean')."
+            "description": "An object representing the common schema of the instances. Keys should reflect intrinsic and specific properties relevant to this class, and values should be a representative value or type (e.g., 'string', 'integer', 'boolean'). For example, for a 'Wolf' class, properties might include 'species', 'habitat', 'diet', 'temperament'. For a 'Character' class, properties might include 'gender', 'age', 'occupation', 'personality_traits'."
         }
     },
     "required": ["name", "description", "properties"]
