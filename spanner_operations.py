@@ -13,19 +13,19 @@ class SpannerOperations:
         self.engine = engine
 
     def _table_exists(self, table_name):
-        with self.engine.connect() as connection:
+        with self.engine.connect().execution_options(read_only=True) as connection:
             query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{table_name}'")
             result = connection.execute(query).scalar()
             return result == 1
 
     def _index_exists(self, index_name):
-        with self.engine.connect() as connection:
+        with self.engine.connect().execution_options(read_only=True) as connection:
             query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME = '{index_name}'")
             result = connection.execute(query).scalar()
             return result == 1
 
     def _graph_exists(self, graph_name):
-        with self.engine.connect() as connection:
+        with self.engine.connect().execution_options(read_only=True) as connection:
             query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.PROPERTY_GRAPH_METADATA WHERE PROPERTY_GRAPH_NAME = '{graph_name}'")
             result = connection.execute(query).scalar()
             return result == 1
