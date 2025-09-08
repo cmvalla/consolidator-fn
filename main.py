@@ -16,7 +16,7 @@ from graph_processing import GraphProcessor
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
 logging_client.setup_logging()
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 # --- Global Client and Operations Initialization (executed once per instance) ---
 client_factory = ClientFactory()
