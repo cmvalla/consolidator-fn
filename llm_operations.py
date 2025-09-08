@@ -67,7 +67,7 @@ class LLMOperations:
                 token = token_response.text
                 headers = {"Authorization": f"Bearer {token}"}
                 
-                payload = {"text": text, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]}
+                payload = {"text": text, "embedding_source": "gemini", "embedding_types": ["clustering", "retrieval_document"]}
                 logging.info(f"Sending embedding request for entity {entity_id}: url={embedding_service_url}, payload={payload}, headers={{'Authorization': 'Bearer ...'}}")
                 response = requests.post(embedding_service_url, json=payload, headers=headers)
                 logging.info(f"Received raw embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
@@ -79,7 +79,7 @@ class LLMOperations:
                         # Ensure both types are present, return zero embeddings if not
                         clustering_embedding = all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
                         semantic_search_embedding = all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
-                        return {"clustering": clustering_embedding, "semantic_search": semantic_search_embedding}
+                        return {"clustering": clustering_embedding, "retrieval_document": retrieval_document_embedding}
                     else:
                         logging.warning(f"Embeddings not found or invalid in response for entity: {entity_id}. Full response: {response.text}")
                         return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
@@ -131,13 +131,35 @@ class LLMOperations:
                 logging.info(f"Received raw batch embedding response (Status: {response.status_code}): {response.text}")
                 
                 if response.status_code == 200:
-                    embeddings = response.json().get("embeddings") # Expect 'embeddings' plural
-                    if embeddings and isinstance(embeddings, list) and all(isinstance(e, list) for e in embeddings):
-                        logging.info(f"Successfully received {len(embeddings)} embeddings.")
-                        return embeddings
-                    else:
-                        logging.warning(f"Embeddings not found or invalid in response. Full response: {response.text}")
-                        return [[0.0] * Config.EMBEDDING_DIMENSION] * len(texts)
+                    response_data = response.json().get("embeddings", {}) # Expect a dictionary of embedding types
+                    
+                    # Initialize a list to hold the processed embeddings for each text
+                    processed_embeddings = []
+                    
+                    # Iterate through the texts to match them with their respective embeddings
+                    for i in range(len(texts)):
+                        single_text_embeddings = {}
+                        # Assuming the response_data contains keys like "clustering" and "retrieval_document"
+                        # and each contains a list of embeddings corresponding to the input texts order
+                        
+                        if "clustering" in response_data and i < len(response_data["clustering"]):
+                            single_text_embeddings["clustering"] = response_data["clustering"][i]
+                        else:
+                            single_text_embeddings["clustering"] = [0.0] * Config.EMBEDDING_DIMENSION
+                        
+                        if "retrieval_document" in response_data and i < len(response_data["retrieval_document"]):
+                            single_text_embeddings["retrieval_document"] = response_data["retrieval_document"][i]
+                        else:
+                            single_text_embeddings["retrieval_document"] = [0.0] * Config.EMBEDDING_DIMENSION
+                        
+                        processed_embeddings.append(single_text_embeddings)
+
+                    logging.info(f"Successfully received and processed {len(processed_embeddings)} embeddings.")
+                    return processed_embeddings
+                else:
+                    logging.warning(f"Embeddings not found or invalid in response. Full response: {response.text}")
+                    # Return a list of dictionaries with zero embeddings for each text
+                    return [{"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "retrieval_document": [0.0] * Config.EMBEDDING_DIMENSION}] * len(texts)
                 
                 elif response.status_code >= 500:
                     logging.warning(f"Embedding service returned a server error ({response.status_code}). Retrying in {backoff_seconds} seconds...\nFull response: {response.text}")
@@ -197,7 +219,8 @@ class LLMOperations:
                 entity_id_to_index[entity_id] = i
             else:
                 logging.warning(f"Skipping embedding for entity {entity_id} because there is no text to embed.")
-                entities[i]['embedding'] = [0.0] * Config.EMBEDDING_DIMENSION
+                entities[i]['clustering_embedding'] = [0.0] * Config.EMBEDDING_DIMENSION
+                entities[i]['retrieval_document_embedding'] = [0.0] * Config.EMBEDDING_DIMENSION
 
         # Batching logic
         batch_size = 50 # Define a suitable batch size
@@ -211,7 +234,8 @@ class LLMOperations:
 
             for j, entity_id in enumerate(batch_entity_ids):
                 original_index = entity_id_to_index[entity_id]
-                entities[original_index]['embedding'] = batch_embeddings[j]
+                entities[original_index]['clustering_embedding'] = batch_embeddings[j]['clustering']
+                entities[original_index]['retrieval_document_embedding'] = batch_embeddings[j]['retrieval_document']
 
         return data
 
