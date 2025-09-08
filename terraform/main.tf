@@ -93,11 +93,6 @@ resource "google_cloud_run_v2_service" "consolidator" {
           value = data.google_cloud_run_v2_service.embedding_service.uri
         }
       }
-    metadata {
-      annotations = {
-        "run.googleapis.com/logging-level" = "debug"
-      }
-    }
   }
   depends_on = [
     data.google_cloud_run_v2_service.embedding_service
