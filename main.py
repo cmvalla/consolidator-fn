@@ -61,6 +61,7 @@ def aggregate_results(data):
 
 @functions_framework.cloud_event
 def consolidator(cloud_event):
+    global redis_ops, spanner_ops, llm_ops, graph_processor
     batch_id = None
     try:
         # Log system resource usage
