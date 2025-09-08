@@ -5,6 +5,7 @@ import numpy as np
 import uuid
 import json
 import re
+import hashlib
 import base64
 from sklearn.metrics.pairwise import cosine_similarity
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -360,12 +361,8 @@ class GraphProcessor:
         return data
 
 def generate_class_eid(name):
-    """Creates a unique, URL-safe base64 ID from a string."""
+    """Creates a consistent and unique ID from a string using SHA256 hash."""
     if not name:
         return None
-    # Normalize the name first to create a consistent base for the ID
-    normalized_name = re.sub(r'[^\\w\\s-]', '', name.lower())
-    normalized_name = re.sub(r'[\\s-]+', '_', normalized_name).strip('_')
-    
-    # Base64 encode the normalized name to ensure it is a safe string
-    return base64.urlsafe_b64encode(normalized_name.encode('utf-8')).decode('utf-8').replace('=', '-')
+    # Use SHA256 hash to create a consistent and unique ID
+    return hashlib.sha256(name.encode('utf-8')).hexdigest()
