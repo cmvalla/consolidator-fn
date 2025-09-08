@@ -103,7 +103,10 @@ class SpannerOperations:
                         self.db_session.execute(text(ddl))
                     logging.info(f"Successfully executed DDL: {ddl}")
                 except (AlreadyExists, FailedPrecondition) as e:
-                    logging.info(f"DDL statement already exists or failed precondition, skipping: {ddl} - Error: {e}")
+                    if isinstance(e, FailedPrecondition) and "Duplicate name in schema" in str(e):
+                        logging.info(f"DDL statement already exists (Duplicate name in schema), skipping: {ddl} - Error: {e}")
+                    else:
+                        logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
                 except Exception as e:
                     logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
             else:
