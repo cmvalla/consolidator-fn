@@ -280,11 +280,14 @@ class GraphProcessor:
                         logging.info(f"Renamed duplicate entity '{original_id}' of type '{duplicate.get('type')}' to '{new_eid}'.")
 
         for rel in relationships:
-            # Ensure 'source' and 'target' keys exist before accessing them
-            if "source" in rel and rel["source"] in eids_to_remap:
-                rel["source"] = eids_to_remap[rel["source"]]
-            if "target" in rel and rel["target"] in eids_to_remap:
-                rel["target"] = eids_to_remap[rel["target"]]
+            # Ensure rel is a dictionary and has 'source' and 'target' keys before processing
+            if isinstance(rel, dict) and "source" in rel and "target" in rel:
+                if rel["source"] in eids_to_remap:
+                    rel["source"] = eids_to_remap[rel["source"]]
+                if rel["target"] in eids_to_remap:
+                    rel["target"] = eids_to_remap[rel["target"]]
+            else:
+                logging.warning(f"Skipping malformed relationship: {rel}. Missing 'source' or 'target' or not a dictionary.")
 
         data["entities"] = list(final_entities.values())
         logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities.")
