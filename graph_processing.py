@@ -29,7 +29,16 @@ class GraphProcessor:
                     all_entities[entity_id] = entity
                 else:
                     logging.warning(f"Skipping entity without id: {entity}")
-            all_relationships.extend(res_json.get("extracted_graph_data", {}).get("relationships", []))
+            # Process relationships to ensure 'source' and 'target' keys are present
+            for rel in res_json.get("extracted_graph_data", {}).get("relationships", []):
+                if "id_1" in rel and "id_2" in rel:
+                    rel["source"] = rel.pop("id_1") # Rename id_1 to source
+                    rel["target"] = rel.pop("id_2") # Rename id_2 to target
+                    all_relationships.append(rel)
+                elif "source" in rel and "target" in rel:
+                    all_relationships.append(rel)
+                else:
+                    logging.warning(f"Skipping malformed relationship from LLM: {rel}. Missing 'id_1'/'id_2' or 'source'/'target'.")
         
         logging.info(f"Aggregated {len(all_entities)} entities and {len(all_relationships)} relationships.")
 
