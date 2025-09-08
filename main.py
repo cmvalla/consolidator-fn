@@ -72,10 +72,7 @@ def consolidator(cloud_event):
         data = decode_pubsub_message(cloud_event)
         batch_id = data.get("batch_id")
 
-        redis_ops = redis_ops
-        spanner_ops = spanner_ops
-        llm_ops = llm_ops
-        graph_processor = graph_processor
+        
 
         consolidated_key = f"consolidated_batch:{batch_id}"
         if redis_client.exists(consolidated_key):
