@@ -85,8 +85,7 @@ class LLMOperations:
                         return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
                 
                 elif response.status_code >= 500:
-                    logging.warning(f"Embedding service returned a server error ({response.status_code}) for entity {entity_id}. Retrying in {backoff_seconds} seconds...
-Full response: {response.text}")
+                    logging.warning(f"Embedding service returned a server error ({response.status_code}) for entity {entity_id}. Retrying in {backoff_seconds} seconds... Full response: {response.text}")
                     time.sleep(backoff_seconds)
                     retries += 1
                     backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
