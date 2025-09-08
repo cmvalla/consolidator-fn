@@ -156,18 +156,16 @@ class LLMOperations:
 
                     logging.info(f"Successfully received and processed {len(processed_embeddings)} embeddings.")
                     return processed_embeddings
-                else:
-                    logging.warning(f"Embeddings not found or invalid in response. Full response: {response.text}")
-                    # Return a list of dictionaries with zero embeddings for each text
-                    return [{"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "retrieval_document": [0.0] * Config.EMBEDDING_DIMENSION}] * len(texts)
                 elif response.status_code >= 500:
                     logging.warning(f"Embedding service returned a server error ({response.status_code}). Retrying in {backoff_seconds} seconds...\nFull response: {response.text}")
                     time.sleep(backoff_seconds)
                     retries += 1
                     backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
                 
-                else:
-                    logging.error(f"Embedding service returned a client error ({response.status_code}): {response.text}")
+                else: # Handle other client errors or invalid responses
+                    logging.error(f"Embedding service returned an unexpected status code ({response.status_code}): {response.text}")
+                    response.raise_for_status() # Raise an exception for non-2xx status codes
+                    return [{"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "retrieval_document": [0.0] * Config.EMBEDDING_DIMENSION}] * len(texts)
                     response.raise_for_status()
                     return [[0.0] * Config.EMBEDDING_DIMENSION] * len(texts)
 
