@@ -66,16 +66,18 @@ class LLMOperations:
                 token = token_response.text
                 headers = {"Authorization": f"Bearer {token}"}
                 
-                logging.debug(f"Sending embedding request for entity {entity_id}: text='{text}'")
+                logging.debug(f"Sending embedding request for entity {entity_id}: url={embedding_service_url}, payload={{"text": text, "embedding_source": "gemini"}}, headers={{'Authorization': 'Bearer ...'}}")
                 response = requests.post(embedding_service_url, json={"text": text, "embedding_source": "gemini"}, headers=headers)
-                logging.debug(f"Received embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
+                logging.debug(f"Received raw embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
                 
                 if response.status_code == 200:
                     embedding = response.json().get("embedding")
+                    logging.debug(f"Raw embedding value for entity {entity_id}: {embedding}")
                     if embedding:
                         # If the embedding is a list of lists (e.g., from batch embedding), take the first one
                         if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
                             embedding = embedding[0]
+                            logging.debug(f"Processed embedding (first element) for entity {entity_id}: {embedding}")
                         return embedding
                     else:
                         logging.warning(f"Embedding not found in response for entity: {entity_id}")
