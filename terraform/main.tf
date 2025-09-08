@@ -7,6 +7,11 @@ resource "google_cloud_run_v2_service" "consolidator" {
 
 
   template {
+    metadata {
+      annotations = {
+        "run.googleapis.com/logging-level" = "debug"
+      }
+    }
     service_account = var.consolidator_sa_email
     timeout         = "1800s" # 30 minutes for potentially long-running consolidations
     scaling {
