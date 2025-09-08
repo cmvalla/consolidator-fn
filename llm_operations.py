@@ -161,13 +161,11 @@ class LLMOperations:
                     time.sleep(backoff_seconds)
                     retries += 1
                     backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
-                
                 else: # Handle other client errors or invalid responses
                     logging.error(f"Embedding service returned an unexpected status code ({response.status_code}): {response.text}")
                     response.raise_for_status() # Raise an exception for non-2xx status codes
+                    # Only one return statement is needed here
                     return [{"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "retrieval_document": [0.0] * Config.EMBEDDING_DIMENSION}] * len(texts)
-                    response.raise_for_status()
-                    return [[0.0] * Config.EMBEDDING_DIMENSION] * len(texts)
 
             except requests.exceptions.RequestException as e:
                 logging.error(f"Error calling embedding service: {e}")
