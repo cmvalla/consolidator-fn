@@ -75,7 +75,7 @@ class GraphProcessor:
 
         clusterable_entities = [e for e in entities if e.get("type") not in ["Chunk", "Community"]]
         entity_ids = [e["id"] for e in clusterable_entities]
-        embeddings = np.array([e.get("embedding") for e in clusterable_entities])
+        embeddings = np.array([e.get("ClusteringEmbedding") for e in clusterable_entities])
 
         valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None and len(emb) > 0]
         if len(valid_indices) < 2:
