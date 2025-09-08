@@ -18,6 +18,26 @@ logging_client = google.cloud.logging.Client()
 logging_client.setup_logging()
 logging.basicConfig(level=logging.INFO)
 
+# --- Global Client and Operations Initialization (executed once per instance) ---
+client_factory = ClientFactory()
+redis_client = client_factory.get_redis_client()
+db_session, db_engine = client_factory.get_db_session()
+llm = client_factory.get_llm()
+
+redis_ops = RedisOperations(redis_client)
+spanner_ops = SpannerOperations(db_session, db_engine)
+llm_ops = LLMOperations(llm)
+graph_processor = GraphProcessor(llm_ops)
+
+# Ensure Spanner schema on startup
+try:
+    spanner_ops.ensure_spanner_schema()
+    logging.info("Spanner schema ensured successfully on startup.")
+except Exception as e:
+    logging.error(f"Failed to ensure Spanner schema on startup: {e}", exc_info=True)
+    # Depending on desired behavior, you might want to exit here or allow the function to proceed
+    # with potential database errors on invocation. For now, we'll just log.
+
 def aggregate_results(data):
     all_entities = {}
     all_relationships = []
@@ -52,17 +72,10 @@ def consolidator(cloud_event):
         data = decode_pubsub_message(cloud_event)
         batch_id = data.get("batch_id")
 
-        client_factory = ClientFactory()
-        redis_client = client_factory.get_redis_client()
-        db_session, db_engine = client_factory.get_db_session()
-        llm = client_factory.get_llm()
-
-        redis_ops = RedisOperations(redis_client)
-        spanner_ops = SpannerOperations(db_session, db_engine)
-        llm_ops = LLMOperations(llm)
-        graph_processor = GraphProcessor(llm_ops)
-        
-        spanner_ops.ensure_spanner_schema()
+        redis_ops = redis_ops
+        spanner_ops = spanner_ops
+        llm_ops = llm_ops
+        graph_processor = graph_processor
 
         consolidated_key = f"consolidated_batch:{batch_id}"
         if redis_client.exists(consolidated_key):
