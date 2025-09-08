@@ -11,7 +11,8 @@ class Entity(Base):
     Eid = Column(String, primary_key=True)
     Type = Column(String)
     Properties = Column(JSON)
-    Embedding = Column(ARRAY(Float))
+    ClusteringEmbedding = Column(ARRAY(Float))
+    RetrievalDocumentEmbedding = Column(ARRAY(Float))
     Communities = Column(ARRAY(String))
 
 class Relationship(Base):
@@ -37,4 +38,5 @@ class Community(Base):
     __tablename__ = "Communities"
     CommunityId = Column(String, primary_key=True)
     Summary = Column(String)
-    Embedding = Column(ARRAY(Float))
+    ClusteringEmbedding = Column(ARRAY(Float))
+    RetrievalDocumentEmbedding = Column(ARRAY(Float))

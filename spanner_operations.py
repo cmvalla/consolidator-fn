@@ -138,16 +138,36 @@ class SpannerOperations:
 
         try:
             with self.db_session.begin():
+                entities_to_merge = []
+                communities_to_merge = []
+
                 for e in valid_entities:
-                    entity = Entity(
-                        Eid=e["id"],
-                        Type=e["type"],
-                        Properties=e.get("properties", {}),
-                        Embedding=e.get("embedding", []),
-                        Communities=e.get("communities", [])
-                    )
+                    if e.get("type") == "Community":
+                        community = Community(
+                            CommunityId=e["id"],
+                            Summary=e.get("properties", {}).get("summary", ""),
+                            ClusteringEmbedding=e.get("clustering_embedding", []),
+                            RetrievalDocumentEmbedding=e.get("retrieval_document_embedding", [])
+                        )
+                        communities_to_merge.append(community)
+                    else:
+                        entity = Entity(
+                            Eid=e["id"],
+                            Type=e["type"],
+                            Properties=e.get("properties", {}),
+                            ClusteringEmbedding=e.get("clustering_embedding", []),
+                            RetrievalDocumentEmbedding=e.get("retrieval_document_embedding", []),
+                            Communities=e.get("communities", [])
+                        )
+                        entities_to_merge.append(entity)
+                
+                for entity in entities_to_merge:
                     self.db_session.merge(entity)
-                logging.info(f"Merged {len(valid_entities)} entities.")
+                logging.info(f"Merged {len(entities_to_merge)} entities.")
+
+                for community in communities_to_merge:
+                    self.db_session.merge(community)
+                logging.info(f"Merged {len(communities_to_merge)} communities.")
 
                 rels_to_upsert = [
                     Relationship(
