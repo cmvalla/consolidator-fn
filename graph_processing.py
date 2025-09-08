@@ -282,10 +282,14 @@ class GraphProcessor:
         for rel in relationships:
             # Ensure rel is a dictionary and has 'source' and 'target' keys before processing
             if isinstance(rel, dict) and "source" in rel and "target" in rel:
-                if rel["source"] in eids_to_remap:
-                    rel["source"] = eids_to_remap[rel["source"]]
-                if rel["target"] in eids_to_remap:
-                    rel["target"] = eids_to_remap[rel["target"]]
+                try:
+                    if rel["source"] in eids_to_remap:
+                        rel["source"] = eids_to_remap[rel["source"]]
+                    if rel["target"] in eids_to_remap:
+                        rel["target"] = eids_to_remap[rel["target"]]
+                except KeyError as e:
+                    logging.error(f"KeyError processing relationship {rel}: {e}", exc_info=True)
+                    continue # Skip this malformed relationship
             else:
                 logging.warning(f"Skipping malformed relationship: {rel}. Missing 'source' or 'target' or not a dictionary.")
 
