@@ -160,7 +160,6 @@ class LLMOperations:
                     logging.warning(f"Embeddings not found or invalid in response. Full response: {response.text}")
                     # Return a list of dictionaries with zero embeddings for each text
                     return [{"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "retrieval_document": [0.0] * Config.EMBEDDING_DIMENSION}] * len(texts)
-                
                 elif response.status_code >= 500:
                     logging.warning(f"Embedding service returned a server error ({response.status_code}). Retrying in {backoff_seconds} seconds...\nFull response: {response.text}")
                     time.sleep(backoff_seconds)
