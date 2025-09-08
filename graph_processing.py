@@ -280,9 +280,10 @@ class GraphProcessor:
                         logging.info(f"Renamed duplicate entity '{original_id}' of type '{duplicate.get('type')}' to '{new_eid}'.")
 
         for rel in relationships:
-            if rel["source"] in eids_to_remap:
+            # Ensure 'source' and 'target' keys exist before accessing them
+            if "source" in rel and rel["source"] in eids_to_remap:
                 rel["source"] = eids_to_remap[rel["source"]]
-            if rel["target"] in eids_to_remap:
+            if "target" in rel and rel["target"] in eids_to_remap:
                 rel["target"] = eids_to_remap[rel["target"]]
 
         data["entities"] = list(final_entities.values())
