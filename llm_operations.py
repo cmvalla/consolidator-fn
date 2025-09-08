@@ -47,11 +47,11 @@ class LLMOperations:
         self.llm = llm
 
     def _get_single_embedding(self, text: str, entity_id: str = "Unknown"):
-        """Generates an embedding for a given text by calling the graphrag-embedding service."""
+        """Generates embeddings for a given text by calling the graphrag-embedding service."""
         embedding_service_url = Config.EMBEDDING_SERVICE_URL
         if not embedding_service_url:
             logging.error("EMBEDDING_SERVICE_URL environment variable not set.")
-            return [[0.0] * Config.EMBEDDING_DIMENSION]
+            return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
 
         MAX_RETRIES = 10
         INITIAL_BACKOFF_SECONDS = 1
@@ -67,26 +67,26 @@ class LLMOperations:
                 token = token_response.text
                 headers = {"Authorization": f"Bearer {token}"}
                 
-                payload = {"text": text, "embedding_source": "gemini"}
+                payload = {"text": text, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]}
                 logging.info(f"Sending embedding request for entity {entity_id}: url={embedding_service_url}, payload={payload}, headers={{'Authorization': 'Bearer ...'}}")
                 response = requests.post(embedding_service_url, json=payload, headers=headers)
                 logging.info(f"Received raw embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
                 
                 if response.status_code == 200:
-                    embedding = response.json().get("embeddings")
-                    logging.info(f"Raw embedding value for entity {entity_id}: {embedding}")
-                    if embedding:
-                        # If the embedding is a list of lists (e.g., from batch embedding), take the first one
-                        if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
-                            embedding = embedding[0]
-                            logging.info(f"Processed embedding (first element) for entity {entity_id}: {embedding}")
-                        return [embedding] # Return as list of lists
+                    all_embeddings = response.json().get("embeddings")
+                    logging.info(f"Raw embeddings value for entity {entity_id}: {all_embeddings}")
+                    if all_embeddings and isinstance(all_embeddings, dict):
+                        # Ensure both types are present, return zero embeddings if not
+                        clustering_embedding = all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
+                        semantic_search_embedding = all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
+                        return {"clustering": clustering_embedding, "semantic_search": semantic_search_embedding}
                     else:
-                        logging.warning(f"Embedding not found in response for entity: {entity_id}. Full response: {response.text}")
-                        return [[0.0] * Config.EMBEDDING_DIMENSION]
+                        logging.warning(f"Embeddings not found or invalid in response for entity: {entity_id}. Full response: {response.text}")
+                        return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
                 
                 elif response.status_code >= 500:
-                    logging.warning(f"Embedding service returned a server error ({response.status_code}) for entity {entity_id}. Retrying in {backoff_seconds} seconds...\nFull response: {response.text}")
+                    logging.warning(f"Embedding service returned a server error ({response.status_code}) for entity {entity_id}. Retrying in {backoff_seconds} seconds...
+Full response: {response.text}")
                     time.sleep(backoff_seconds)
                     retries += 1
                     backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
@@ -94,7 +94,7 @@ class LLMOperations:
                 else:
                     logging.error(f"Embedding service returned a client error ({response.status_code}) for entity {entity_id}: {response.text}")
                     response.raise_for_status()
-                    return [[0.0] * Config.EMBEDDING_DIMENSION]
+                    return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
 
             except requests.exceptions.RequestException as e:
                 logging.error(f"Error calling embedding service for entity {entity_id}: {e}")
@@ -102,8 +102,8 @@ class LLMOperations:
                 retries += 1
                 backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
 
-        logging.error(f"Failed to get embedding for entity {entity_id} after {MAX_RETRIES} retries.")
-        return [[0.0] * Config.EMBEDDING_DIMENSION]
+        logging.error(f"Failed to get embeddings for entity {entity_id} after {MAX_RETRIES} retries.")
+        return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
 
     def get_embeddings(self, texts: List[str]):
         """Generates embeddings for a list of texts by calling the graphrag-embedding service."""

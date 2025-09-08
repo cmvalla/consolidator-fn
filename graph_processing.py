@@ -341,9 +341,10 @@ class GraphProcessor:
             full_community_summary = " ".join(entity_texts) 
             
             if full_community_summary:
-                embedding = self.llm_ops.get_embedding(full_community_summary, comm_id)
+                all_embeddings = self.llm_ops._get_single_embedding(full_community_summary, comm_id)
+                semantic_search_embedding = all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
             else:
-                embedding = [0.0] * Config.EMBEDDING_DIMENSION
+                semantic_search_embedding = [0.0] * Config.EMBEDDING_DIMENSION
             
             community_entity = {
                 "id": comm_id,
@@ -352,7 +353,7 @@ class GraphProcessor:
                     "summary": full_community_summary,
                     "community_type": "structural"
                 },
-                "embedding": embedding,
+                "embedding": semantic_search_embedding, # Use semantic search embedding for the main embedding field
                 "communities": []
             }
             entities.append(community_entity)
