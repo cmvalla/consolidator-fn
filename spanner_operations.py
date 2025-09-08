@@ -3,6 +3,7 @@ import logging
 import hashlib
 import re
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
+from google.cloud.spanner_dbapi.exceptions import ProgrammingError
 from models import Entity, Relationship, InstanceOf, WorkflowStatus, Base
 from sqlalchemy import func, text
 from sqlalchemy.orm import sessionmaker
@@ -25,10 +26,16 @@ class SpannerOperations:
             return result == 1
 
     def _graph_exists(self, graph_name):
-        with self.engine.connect().execution_options(read_only=True) as connection:
-            query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.PROPERTY_GRAPH_METADATA WHERE PROPERTY_GRAPH_NAME = '{graph_name}'")
-            result = connection.execute(query).scalar()
-            return result == 1
+        try:
+            with self.engine.connect().execution_options(read_only=True) as connection:
+                query = text(f"SELECT 1 FROM INFORMATION_SCHEMA.PROPERTY_GRAPHS WHERE PROPERTY_GRAPH_NAME = '{graph_name}'")
+                result = connection.execute(query).scalar()
+                return result == 1
+        except ProgrammingError as e:
+            # If INFORMATION_SCHEMA.PROPERTY_GRAPHS is not found, it means the graph doesn't exist
+            # or the feature is not enabled. Treat as not existing.
+            logging.warning(f"Could not query INFORMATION_SCHEMA.PROPERTY_GRAPHS for graph '{graph_name}': {e}")
+            return False
 
     def ensure_spanner_schema(self):
         """

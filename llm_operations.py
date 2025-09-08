@@ -66,7 +66,9 @@ class LLMOperations:
                 token = token_response.text
                 headers = {"Authorization": f"Bearer {token}"}
                 
+                logging.debug(f"Sending embedding request for entity {entity_id}: text='{text}'")
                 response = requests.post(embedding_service_url, json={"text": text, "embedding_source": "gemini"}, headers=headers)
+                logging.debug(f"Received embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
                 
                 if response.status_code == 200:
                     embedding = response.json().get("embedding")
