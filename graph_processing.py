@@ -75,7 +75,7 @@ class GraphProcessor:
 
         clusterable_entities = [e for e in entities if e.get("type") not in ["Chunk", "Community"]]
         entity_ids = [e["id"] for e in clusterable_entities]
-        embeddings = np.array([e.get("ClusteringEmbedding") for e in clusterable_entities])
+        embeddings = np.array([e.get("clustering_embedding") for e in clusterable_entities])
 
         valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None and len(emb) > 0]
         
@@ -180,12 +180,13 @@ class GraphProcessor:
                         logging.info(f"Merged cluster into existing class '{class_name}' (ID: {existing_class_eid})")
                     else:
                         summary = summarization_chain.invoke({"text_chunk": cluster_info["cluster_text"]}).get("text")
-                        embedding = self.llm_ops.get_embedding(summary, class_eid)
+                        all_embeddings = self.llm_ops._get_single_embedding(summary, class_eid)
                         class_entity = {
                             "id": class_eid,
                             "type": "Class",
                             "properties": generated_properties,
-                            "embedding": embedding
+                            "clustering_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
+                            "retrieval_document_embedding": all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
                         }
                         name_to_class_entity[class_name] = class_entity
                         for member_id in cluster_member_ids:
@@ -336,7 +337,7 @@ class GraphProcessor:
         g.vs["id"] = [entity["id"] for entity in entities]
         g.vs["type"] = [entity["type"] for entity in entities]
         g.vs["properties"] = [entity["properties"] for entity in entities]
-        g.vs["embedding"] = [entity.get("embedding") for entity in entities]
+        g.vs["embedding"] = [entity.get("clustering_embedding") for entity in entities]
 
         edges = []
         for rel in relationships:
@@ -388,7 +389,8 @@ class GraphProcessor:
                     "summary": full_community_summary,
                     "community_type": "structural"
                 },
-                "embedding": semantic_search_embedding, # Use semantic search embedding for the main embedding field
+                "clustering_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
+                "retrieval_document_embedding": semantic_search_embedding, # Use semantic search embedding for the main embedding field
                 "communities": []
             }
             entities.append(community_entity)

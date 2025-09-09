@@ -2,7 +2,8 @@ CREATE TABLE Entities (
   Eid STRING(MAX) NOT NULL,
   Type STRING(MAX) NOT NULL,
   Properties JSON,
-  Embedding ARRAY<FLOAT64>(vector_length=>768),
+  ClusteringEmbedding ARRAY<FLOAT64>(vector_length=>768),
+  RetrievalDocumentEmbedding ARRAY<FLOAT64>(vector_length=>768),
   Communities ARRAY<STRING(MAX)>,
 ) PRIMARY KEY (Eid);
 
@@ -32,7 +33,8 @@ CREATE TABLE ProcessedDocuments (
 CREATE TABLE Communities (
   CommunityId STRING(MAX) NOT NULL,
   Summary STRING(MAX),
-  Embedding ARRAY<FLOAT64>(vector_length=>768),
+  ClusteringEmbedding ARRAY<FLOAT64>(vector_length=>768),
+  RetrievalDocumentEmbedding ARRAY<FLOAT64>(vector_length=>768),
 ) PRIMARY KEY (CommunityId);
 
 CREATE TABLE EntityCommunity (
@@ -59,6 +61,8 @@ CREATE PROPERTY GRAPH my_graph
             DESTINATION KEY (CommunityId) REFERENCES Communities (CommunityId)
     );
 
-CREATE VECTOR INDEX EntitiesEmbeddingIndex ON Entities(Embedding) WHERE Embedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
+CREATE VECTOR INDEX EntitiesClusteringEmbeddingIndex ON Entities(ClusteringEmbedding) WHERE ClusteringEmbedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
+CREATE VECTOR INDEX EntitiesRetrievalDocumentEmbeddingIndex ON Entities(RetrievalDocumentEmbedding) WHERE RetrievalDocumentEmbedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
 
-CREATE VECTOR INDEX CommunitiesEmbeddingIndex ON Communities(Embedding) WHERE Embedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
+CREATE VECTOR INDEX CommunitiesClusteringEmbeddingIndex ON Communities(ClusteringEmbedding) WHERE ClusteringEmbedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
+CREATE VECTOR INDEX CommunitiesRetrievalDocumentEmbeddingIndex ON Communities(RetrievalDocumentEmbedding) WHERE RetrievalDocumentEmbedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
