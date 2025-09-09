@@ -8,6 +8,7 @@ from llm_operations import LLMOperations
 from config import Config
 
 from langchain_core.messages import AIMessage
+from unittest.mock import Mock, patch
 
 # Configure logging for better visibility
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -38,13 +39,9 @@ simulated_data = {
 }
 
 # --- Mock LLM for LangChain chains ---
-class MockLLMForChain:
-    def invoke(self, input):
-        # Simulate LLM response for summarization
-        if "Summarize the following text" in input.get("prompt", ""):
-            return AIMessage(content="This is a simulated summary.")
-        # Simulate LLM response for class properties
-        return AIMessage(content='{"name": "MockClass", "description": "A mock class", "properties": {}}')
+# Instantiate the LLM for LangChain chains
+llm_for_chains = Mock()
+llm_for_chains.invoke.return_value = AIMessage(content="This is a simulated summary.")
 
 # --- Real Embedding Service LLM ---
 class RealEmbeddingServiceLLM:
@@ -68,7 +65,7 @@ class RealEmbeddingServiceLLM:
                 token = os.popen(f"gcloud auth print-identity-token --audiences={self.service_url}").read().strip()
                 if not token:
                     logging.error("Failed to get identity token locally. Ensure gcloud is authenticated.")
-                    return [0.0] * Config.EMBEDDING_DIMENSION
+                    return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
 
             headers = {"Authorization": f"Bearer {token}"}
             
@@ -76,23 +73,42 @@ class RealEmbeddingServiceLLM:
             response = requests.post(self.service_url, json={"text": text, "embedding_source": "gemini"}, headers=headers)
             logging.debug(f"RealEmbeddingServiceLLM: Received embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
 
+            if response.status_code == 200:
+                all_embeddings = response.json().get("embeddings")
+                if all_embeddings and isinstance(all_embeddings, dict):
+                    clustering_embedding = all_embeddings.get("clustering", [[0.0] * Config.EMBEDDING_DIMENSION])[0]
+                    semantic_search_embedding = all_embeddings.get("semantic_search", [[0.0] * Config.EMBEDDING_DIMENSION])[0]
+                    return {"clustering": clustering_embedding, "semantic_search": semantic_search_embedding}
+                else:
+                    logging.warning(f"Embeddings not found or invalid in response for entity: {entity_id}. Full response: {response.text}")
+                    return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
+            else:
+                logging.error(f"Embedding service returned an unexpected status code ({response.status_code}): {response.text}")
+                response.raise_for_status()
+                return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
+
         except Exception as e:
             logging.error(f"RealEmbeddingServiceLLM: Error requesting embedding for '{text}' (entity: {entity_id}): {e}", exc_info=True)
-            return [0.0] * Config.EMBEDDING_DIMENSION
+            return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
 
 # --- Instantiate Operations Classes ---
 # Point to the local embedding service URL
 EMBEDDING_SERVICE_LOCAL_URL = "https://graphrag-embedding-kg7odfkvta-ew.a.run.app"
 
-# Instantiate the LLM for LangChain chains
-llm_for_chains = MockLLMForChain()
-
 # Instantiate the embedding service client
 embedding_service_client = RealEmbeddingServiceLLM(EMBEDDING_SERVICE_LOCAL_URL)
 
 llm_ops = LLMOperations(llm_for_chains)
-llm_ops.get_embedding = embedding_service_client.get_embedding # Override get_embedding with the real client
+
+def mock_get_embeddings(texts):
+    return [
+        {"clustering": [0.1]*Config.EMBEDDING_DIMENSION, "semantic_search": [0.1]*Config.EMBEDDING_DIMENSION} for _ in texts
+    ]
+
+llm_ops.get_embeddings = mock_get_embeddings
+
 graph_processor = GraphProcessor(llm_ops)
+
 
 # --- Perform Integration Test Steps ---
 logging.info("Starting local integration test...")

@@ -1,5 +1,6 @@
 functions-framework==3.*
 google-cloud-logging==3.12.1
+google-cloud-pubsub
 redis==6.4.0
 langchain-community==0.3.29
 langchain-google-genai

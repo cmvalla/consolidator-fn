@@ -177,7 +177,7 @@ class LLMOperations:
         """Generates embeddings for all entities and communities in batches."""
         entities = data.get("entities", [])
         
-        summarization_chain = LLMChain(llm=self.llm, prompt=SUMMARY_PROMPT)
+        summarization_chain = SUMMARY_PROMPT | self.llm
 
         texts_to_embed_map = {} # Map entity_id to text_to_embed
         entity_id_to_index = {} # Map entity_id to its original index in entities list

@@ -19,42 +19,20 @@ logging_client = google.cloud.logging.Client()
 logging_client.setup_logging()
 logging.basicConfig(level=logging.DEBUG)
 
-# --- Global Client and Operations Initialization (executed once per instance) ---
-client_factory = ClientFactory()
-redis_client = client_factory.get_redis_client()
-llm = client_factory.get_llm()
-publisher = pubsub_v1.PublisherClient() # Added for Pub/Sub publishing
-
-redis_ops = RedisOperations(redis_client)
-llm_ops = LLMOperations(llm)
-graph_processor = GraphProcessor(llm_ops)
-
-def aggregate_results(data):
-    all_entities = {}
-    all_relationships = []
-    for res_str in data["partial_results"]:
-        res_json = json.loads(res_str)
-        for entity in res_json.get("extracted_graph_data", {}).get("entities", []):
-            entity_id = entity.get("id")
-            if entity_id:
-                all_entities[entity_id] = entity
-            else:
-                logging.warning(f"Skipping entity without id: {entity}")
-        all_relationships.extend(res_json.get("extracted_graph_data", {}).get("relationships", []))
-    
-    logging.info(f"Aggregated {len(all_entities)} entities and {len(all_relationships)} relationships.")
-
-    return {
-        "batch_id": data["batch_id"],
-        "entities": list(all_entities.values()),
-        "relationships": all_relationships
-    }
-
 @functions_framework.cloud_event
 def consolidator(cloud_event):
-    global redis_ops, spanner_ops, llm_ops, graph_processor
     batch_id = None
     try:
+        # Initialize clients and operations inside the function
+        client_factory = ClientFactory()
+        redis_client = client_factory.get_redis_client()
+        llm = client_factory.get_llm()
+        publisher = pubsub_v1.PublisherClient()
+
+        redis_ops = RedisOperations(redis_client)
+        llm_ops = LLMOperations(llm)
+        graph_processor = GraphProcessor(llm_ops)
+
         # Log system resource usage
         cpu_usage = psutil.cpu_percent(interval=1)
         memory_info = psutil.virtual_memory()

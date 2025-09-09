@@ -9,7 +9,8 @@ import sys
 @patch("main.redis.Redis") # Patch redis.Redis directly
 @patch("main.sqlalchemy.create_engine") # Patch sqlalchemy.create_engine
 @patch("main.langchain_google_genai.ChatGoogleGenerativeAI") # Patch ChatGoogleGenerativeAI
-def test_consolidator_orchestration(mock_psutil, mock_decode_pubsub, mock_client_factory, mock_redis_class, mock_create_engine, mock_chat_google_generative_ai):
+@patch("clients.secretmanager.SecretManagerServiceClient") # Patch SecretManagerServiceClient
+def test_consolidator_orchestration(mock_psutil, mock_decode_pubsub, mock_client_factory, mock_redis_class, mock_create_engine, mock_chat_google_generative_ai, mock_secret_manager_client):
     # Import main *inside* the test function, after patches are applied
     from main import consolidator, ClientFactory, RedisOperations, SpannerOperations, LLMOperations, GraphProcessor, decode_pubsub_message
 
@@ -35,6 +36,9 @@ def test_consolidator_orchestration(mock_psutil, mock_decode_pubsub, mock_client
     mock_redis_class.return_value = mock_redis_client
     mock_create_engine.return_value = Mock()
     mock_chat_google_generative_ai.return_value = mock_llm
+
+    # Configure SecretManagerServiceClient mock
+    mock_secret_manager_client.return_value.access_secret_version.return_value.payload.data.decode.return_value = "mock_password"
 
     # Configure the mock factory to return mock clients
     mock_factory_instance = mock_client_factory.return_value

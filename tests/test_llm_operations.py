@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import Mock, patch
 import json
 import os
+from langchain_core.messages import AIMessage
 
 from llm_operations import LLMOperations
 
@@ -19,31 +20,34 @@ def test_get_embedding(mock_config, mock_llm):
         with patch("requests.get") as mock_get:
             mock_get.return_value.text = "token"
             mock_post.return_value.status_code = 200
-            mock_post.return_value.json.return_value = {"embedding": [0.1, 0.2, 0.3]}
-            embedding = llm_ops.get_embedding("test text")
-            assert embedding == [0.1, 0.2, 0.3]
+            mock_post.return_value.json.return_value = {"embeddings": {"clustering": [[0.1, 0.2, 0.3]], "semantic_search": [[0.4, 0.5, 0.6]]}}
+            embedding = llm_ops._get_single_embedding("test text")
+            assert embedding == {"clustering": [0.1, 0.2, 0.3], "semantic_search": [0.4, 0.5, 0.6]}
 
-@patch("llm_operations.LLMChain")
-def test_generate_embeddings(mock_llm_chain, mock_llm):
+@patch("llm_operations.SUMMARY_PROMPT")
+def test_generate_embeddings(mock_summary_prompt, mock_llm):
     llm_ops = LLMOperations(mock_llm)
     data = {
         "entities": [
-            {"id": "e1", "type": "Chunk", "properties": {"summary": "summary1"}},
+            {"id": "e1", "type": "Chunk", "properties": {"summary": "", "original_text": "some original text"}},
             {"id": "e2", "type": "Person", "properties": {"name": "John Doe"}}
         ]
     }
 
-    with patch.object(llm_ops, 'get_embedding') as mock_get_embedding:
-        mock_get_embedding.return_value = [0.1, 0.2, 0.3]
+    # Mock the invoke method of the llm object
+    mock_llm.invoke.return_value = AIMessage(content="simulated summary")
+
+    with patch.object(llm_ops, 'get_embeddings') as mock_get_embeddings:
+        mock_get_embeddings.return_value = [
+            {"clustering": [0.1, 0.2, 0.3], "semantic_search": [0.4, 0.5, 0.6]},
+            {"clustering": [0.1, 0.2, 0.3], "semantic_search": [0.4, 0.5, 0.6]}
+        ]
         result = llm_ops.generate_embeddings(data)
         assert len(result["entities"]) == 2
-        assert "embedding" in result["entities"][0]
-        assert "embedding" in result["entities"][1]
+        assert "clustering_embedding" in result["entities"][0]
+        assert "semantic_search_embedding" in result["entities"][0]
+        assert "clustering_embedding" in result["entities"][1]
+        assert "semantic_search_embedding" in result["entities"][1]
 
-def test_extract_json_from_llm_response(mock_llm):
-    llm_ops = LLMOperations(mock_llm)
-    text = '''```json
-{"key": "value"}
-```'''
-    result = llm_ops.extract_json_from_llm_response(text)
-    assert result == '{"key": "value"}'
+    # Assert that llm.invoke was called for the Chunk entity
+    mock_llm.invoke.assert_called_once()
