@@ -15,8 +15,5 @@ CREATE PROPERTY GRAPH my_graph
             DESTINATION KEY (CommunityId) REFERENCES Communities (CommunityId)
     );
 
-CREATE VECTOR INDEX EntitiesClusteringEmbeddingIndex ON Entities(ClusteringEmbedding) WHERE ClusteringEmbedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
-CREATE VECTOR INDEX EntitiesRetrievalDocumentEmbeddingIndex ON Entities(RetrievalDocumentEmbedding) WHERE RetrievalDocumentEmbedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
-
-CREATE VECTOR INDEX CommunitiesClusteringEmbeddingIndex ON Communities(ClusteringEmbedding) WHERE ClusteringEmbedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
-CREATE VECTOR INDEX CommunitiesRetrievalDocumentEmbeddingIndex ON Communities(RetrievalDocumentEmbedding) WHERE RetrievalDocumentEmbedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
+CREATE VECTOR INDEX EntitiesEmbeddingIndex ON Entities(Embedding) WHERE Embedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
+CREATE VECTOR INDEX CommunitiesEmbeddingIndex ON Communities(Embedding) WHERE Embedding IS NOT NULL OPTIONS(distance_type = 'COSINE');
