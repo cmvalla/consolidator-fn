@@ -2,10 +2,7 @@
 import logging
 import requests
 import time
-import os
 import json
-import re
-from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate

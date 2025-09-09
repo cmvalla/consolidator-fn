@@ -28,3 +28,16 @@ class RedisOperations:
         except Exception as e:
             logging.error(f"Error storing consolidated results for batch {batch_id} in Redis: {e}", exc_info=True)
         return data
+
+    def save_processed_data(self, batch_id, data):
+        """Stores the processed entities and relationships in Redis for later retrieval by the persistor."""
+        processed_key = f"processed_batch:{batch_id}"
+        try:
+            self.redis_client.hset(processed_key, mapping={
+                "entities": json.dumps(data["entities"]),
+                "relationships": json.dumps(data["relationships"])
+            })
+            self.redis_client.expire(processed_key, 86400) # Expire after 24 hours
+            logging.info(f"Stored processed data for batch {batch_id} in Redis.")
+        except Exception as e:
+            logging.error(f"Error storing processed data for batch {batch_id} in Redis: {e}", exc_info=True)

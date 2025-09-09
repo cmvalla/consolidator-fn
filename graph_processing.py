@@ -4,15 +4,15 @@ import igraph as ig
 import numpy as np
 import uuid
 import json
-import re
-import hashlib
-import base64
 from sklearn.metrics.pairwise import cosine_similarity
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from llm_operations import LLMOperations, CLASS_PROPERTY_GENERATION_PROMPT, SUMMARY_PROMPT, CLASS_SCHEMA
 from config import Config
+from llm_operations import LLMOperations
+from llm_operations import CLASS_PROPERTY_GENERATION_PROMPT, SUMMARY_PROMPT
+import hashlib
 
 class GraphProcessor:
     def __init__(self, llm_operations):

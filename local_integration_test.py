@@ -1,17 +1,13 @@
 import logging
-import json
-import numpy as np
 import requests
 import os
-from unittest.mock import Mock
 
 # Assuming these are in the same directory or accessible via PYTHONPATH
 from graph_processing import GraphProcessor
 from llm_operations import LLMOperations
 from config import Config
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
-from langchain_core.runnables import Runnable
+from langchain_core.messages import AIMessage
 
 # Configure logging for better visibility
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -42,10 +38,10 @@ simulated_data = {
 }
 
 # --- Mock LLM for LangChain chains ---
-class MockLLMForChain(Runnable):
-    def invoke(self, prompt):
+class MockLLMForChain:
+    def invoke(self, input):
         # Simulate LLM response for summarization
-        if "Summarize the following text" in prompt:
+        if "Summarize the following text" in input.get("prompt", ""):
             return AIMessage(content="This is a simulated summary.")
         # Simulate LLM response for class properties
         return AIMessage(content='{"name": "MockClass", "description": "A mock class", "properties": {}}')

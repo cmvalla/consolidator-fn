@@ -1,11 +1,18 @@
 import pytest
 from unittest.mock import Mock, patch
-from main import consolidator
+import sys
 
+# The rest of the test file remains the same
 @patch("main.ClientFactory")
 @patch("main.decode_pubsub_message")
 @patch("main.psutil")
-def test_consolidator_orchestration(mock_psutil, mock_decode_pubsub, mock_client_factory):
+@patch("main.redis.Redis") # Patch redis.Redis directly
+@patch("main.sqlalchemy.create_engine") # Patch sqlalchemy.create_engine
+@patch("main.langchain_google_genai.ChatGoogleGenerativeAI") # Patch ChatGoogleGenerativeAI
+def test_consolidator_orchestration(mock_psutil, mock_decode_pubsub, mock_client_factory, mock_redis_class, mock_create_engine, mock_chat_google_generative_ai):
+    # Import main *inside* the test function, after patches are applied
+    from main import consolidator, ClientFactory, RedisOperations, SpannerOperations, LLMOperations, GraphProcessor, decode_pubsub_message
+
     # Mock psutil
     mock_memory_info = Mock()
     mock_memory_info.total = 8 * 1024**3
@@ -24,16 +31,22 @@ def test_consolidator_orchestration(mock_psutil, mock_decode_pubsub, mock_client
     mock_db_session = Mock()
     mock_llm = Mock()
     
+    # Configure the mocked external dependencies
+    mock_redis_class.return_value = mock_redis_client
+    mock_create_engine.return_value = Mock()
+    mock_chat_google_generative_ai.return_value = mock_llm
+
     # Configure the mock factory to return mock clients
     mock_factory_instance = mock_client_factory.return_value
     mock_factory_instance.get_redis_client.return_value = mock_redis_client
-    mock_factory_instance.get_db_session.return_value = mock_db_session
+    mock_factory_instance.get_db_session.return_value = (mock_db_session, Mock()) # get_db_session returns session and engine
     mock_factory_instance.get_llm.return_value = mock_llm
 
     # Mock the operations classes
     with patch("main.RedisOperations") as mock_redis_ops, \
          patch("main.SpannerOperations") as mock_spanner_ops, \
-         patch("main.LLMOperations") as mock_llm_ops, \
+         patch(
+             "main.LLMOperations") as mock_llm_ops, \
          patch("main.GraphProcessor") as mock_graph_processor:
 
         # Mock the return values of the operations
