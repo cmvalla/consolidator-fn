@@ -77,8 +77,8 @@ class LLMOperations:
                     logging.info(f"Raw embeddings value for entity {entity_id}: {all_embeddings}")
                     if all_embeddings and isinstance(all_embeddings, dict):
                         # Ensure both types are present, return zero embeddings if not
-                        clustering_embedding = all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
-                        semantic_search_embedding = all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
+                        clustering_embedding = all_embeddings.get("clustering", [[0.0] * Config.EMBEDDING_DIMENSION])[0]
+                        semantic_search_embedding = all_embeddings.get("semantic_search", [[0.0] * Config.EMBEDDING_DIMENSION])[0]
                         return {"clustering": clustering_embedding, "semantic_search": semantic_search_embedding}
                     else:
                         logging.warning(f"Embeddings not found or invalid in response for entity: {entity_id}. Full response: {response.text}")
