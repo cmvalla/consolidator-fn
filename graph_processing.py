@@ -336,7 +336,7 @@ class GraphProcessor:
         g.add_vertices(len(entities))
         g.vs["id"] = [entity["id"] for entity in entities]
         g.vs["type"] = [entity["type"] for entity in entities]
-        g.vs["properties"] = [entity["properties"] for entity in entities]
+        g.vs["properties"] = [entity.get("properties", {}) for entity in entities]
         g.vs["embedding"] = [entity.get("clustering_embedding") for entity in entities]
 
         edges = []
