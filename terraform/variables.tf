@@ -66,26 +66,7 @@ variable "redis_port" {
 
 
 
-variable "memgraph_host" {
-  type        = string
-  description = "The Memgraph host."
-}
 
-variable "memgraph_port" {
-  type        = string
-  description = "The Memgraph port."
-}
-
-variable "memgraph_password" {
-  type        = string
-  description = "The Memgraph password."
-  sensitive   = true
-}
-
-variable "memgraph_user" {
-  type        = string
-  description = "The Memgraph username."
-}
 
 variable "vpc_connector" {
   type        = string
