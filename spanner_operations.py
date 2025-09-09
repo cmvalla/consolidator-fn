@@ -45,15 +45,16 @@ class SpannerOperations:
         """
         logging.info("Ensuring Spanner schema...")
 
-        # 1. Create tables using SQLAlchemy ORM
         try:
+            # 1. Create tables using SQLAlchemy ORM
+            # This will create/update tables based on models.py
             Base.metadata.create_all(self.engine)
             logging.info("SQLAlchemy ORM tables ensured.")
         except Exception as e:
             logging.error(f"Error creating tables with SQLAlchemy ORM: {e}", exc_info=True)
-            # Continue, as some tables might exist and we need to handle other DDL
+            raise # Re-raise to prevent further execution with incomplete tables
 
-        # 2. Execute Spanner-specific DDL from schema.sql conditionally
+        # 2. Execute Spanner-specific DDL from schema.sql for graphs and vector indexes
         try:
             with open("schema.sql", "r") as f:
                 ddl_statements = [statement.strip() for statement in f.read().split(';') if statement.strip()]
@@ -65,52 +66,47 @@ class SpannerOperations:
             ddl_type = None
             ddl_name = None
 
-            # Try to parse CREATE TABLE (already handled by ORM, but might be in schema.sql)
-            match = re.match(r"CREATE TABLE (\w+)", ddl, re.IGNORECASE)
+            # Parse CREATE VECTOR INDEX
+            match = re.match(r"CREATE VECTOR INDEX (\w+)", ddl, re.IGNORECASE)
             if match:
-                ddl_type = "TABLE"
+                ddl_type = "INDEX"
                 ddl_name = match.group(1)
-            
-            # Try to parse CREATE VECTOR INDEX
-            if not ddl_type:
-                match = re.match(r"CREATE VECTOR INDEX (\w+)", ddl, re.IGNORECASE)
-                if match:
-                    ddl_type = "INDEX"
-                    ddl_name = match.group(1)
-
-            # Try to parse CREATE PROPERTY GRAPH
-            if not ddl_type:
+            else:
+                # Parse CREATE PROPERTY GRAPH
                 match = re.match(r"CREATE PROPERTY GRAPH (\w+)", ddl, re.IGNORECASE)
                 if match:
                     ddl_type = "GRAPH"
                     ddl_name = match.group(1)
 
-            should_execute = True
             if ddl_type and ddl_name:
-                if ddl_type == "TABLE" and self._table_exists(ddl_name):
-                    logging.info(f"Table '{ddl_name}' already exists, skipping DDL.")
-                    should_execute = False
-                elif ddl_type == "INDEX" and self._index_exists(ddl_name):
+                should_execute = True
+                if ddl_type == "INDEX" and self._index_exists(ddl_name):
                     logging.info(f"Index '{ddl_name}' already exists, skipping DDL.")
                     should_execute = False
                 elif ddl_type == "GRAPH" and self._graph_exists(ddl_name):
                     logging.info(f"Property Graph '{ddl_name}' already exists, skipping DDL.")
                     should_execute = False
-            
-            if should_execute:
-                try:
-                    with self.db_session.begin():
-                        self.db_session.execute(text(ddl))
-                    logging.info(f"Successfully executed DDL: {ddl}")
-                except (AlreadyExists, FailedPrecondition) as e:
-                    if isinstance(e, FailedPrecondition) and "Duplicate name in schema" in str(e):
-                        logging.info(f"DDL statement already exists (Duplicate name in schema), skipping: {ddl} - Error: {e}")
-                    else:
+
+                if should_execute:
+                    try:
+                        # Execute DDL for indexes and graphs within a transaction
+                        with self.db_session.begin():
+                            self.db_session.execute(text(ddl))
+                        logging.info(f"Successfully executed DDL: {ddl}")
+                    except (AlreadyExists, FailedPrecondition) as e:
+                        if isinstance(e, FailedPrecondition) and "Duplicate name in schema" in str(e):
+                            logging.info(f"DDL statement already exists (Duplicate name in schema), skipping: {ddl} - Error: {e}")
+                        else:
+                            logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
+                            raise # Re-raise to prevent consolidator from starting with incomplete schema
+                    except Exception as e:
                         logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
-                except Exception as e:
-                    logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
+                        raise # Re-raise to prevent consolidator from starting with incomplete schema
+                else:
+                    logging.info(f"DDL statement for '{ddl_name}' skipped as it already exists.")
             else:
-                logging.info(f"DDL statement for '{ddl_name}' skipped as it already exists.")
+                # Log if a DDL statement is not recognized as INDEX or GRAPH
+                logging.warning(f"Unrecognized DDL statement in schema.sql (skipping): {ddl}")
 
     def migrate_to_spanner(self, data):
         """Migrates the final graph data to Cloud Spanner using SQLAlchemy."""

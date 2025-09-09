@@ -12,17 +12,15 @@ CREATE TABLE Relationships (
   SourceEid STRING(MAX) NOT NULL,
   TargetEid STRING(MAX) NOT NULL,
   Type STRING(MAX) NOT NULL,
-  Properties JSON,
-  CONSTRAINT FK_Source FOREIGN KEY (SourceEid) REFERENCES Entities (Eid),
-  CONSTRAINT FK_Target FOREIGN KEY (TargetEid) REFERENCES Entities (Eid),
-) PRIMARY KEY (Rid);
+  Properties JSON
+) PRIMARY KEY (Rid),
+INTERLEAVE IN PARENT Entities ON DELETE CASCADE;
 
 CREATE TABLE InstanceOf (
   InstanceEid STRING(MAX) NOT NULL,
-  ClassEid STRING(MAX) NOT NULL,
-  CONSTRAINT FK_Instance FOREIGN KEY (InstanceEid) REFERENCES Entities (Eid),
-  CONSTRAINT FK_Class FOREIGN KEY (ClassEid) REFERENCES Entities (Eid),
-) PRIMARY KEY (InstanceEid, ClassEid);
+  ClassEid STRING(MAX) NOT NULL
+) PRIMARY KEY (InstanceEid, ClassEid),
+INTERLEAVE IN PARENT Entities ON DELETE CASCADE;
 
 CREATE TABLE ProcessedDocuments (
   BatchId STRING(MAX) NOT NULL,
