@@ -1,10 +1,9 @@
-# Spanner operations for the consolidator function
 import logging
 import hashlib
 import re
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
 from google.cloud.spanner_dbapi.exceptions import ProgrammingError
-from models import Entity, Relationship, InstanceOf, WorkflowStatus, Base, Community
+from models import Entity, Relationship, InstanceOf, WorkflowStatus, Base, Community, EntityCommunity
 from sqlalchemy import func, text
 from sqlalchemy.orm import sessionmaker
 
@@ -100,7 +99,7 @@ class SpannerOperations:
                             logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
                             raise # Re-raise to prevent consolidator from starting with incomplete schema
                     except Exception as e:
-                        logging.error(f"Error executing DDL statement: {ddl}", exc_info=True)
+                        logging.error(f"Error executing DDL statement: {e}", exc_info=True)
                         raise # Re-raise to prevent consolidator from starting with incomplete schema
                 else:
                     logging.info(f"DDL statement for '{ddl_name}' skipped as it already exists.")
