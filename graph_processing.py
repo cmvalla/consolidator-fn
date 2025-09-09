@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import Config
 from llm_operations import LLMOperations
-from llm_operations import CLASS_PROPERTY_GENERATION_PROMPT, SUMMARY_PROMPT
+from llm_operations import CLASS_PROPERTY_GENERATION_PROMPT, SUMMARY_PROMPT, CLASS_SCHEMA
 import hashlib
 
 class GraphProcessor:
