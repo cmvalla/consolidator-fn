@@ -4,7 +4,7 @@ import hashlib
 import re
 from google.api_core.exceptions import AlreadyExists, FailedPrecondition
 from google.cloud.spanner_dbapi.exceptions import ProgrammingError
-from models import Entity, Relationship, InstanceOf, WorkflowStatus, Base
+from models import Entity, Relationship, InstanceOf, WorkflowStatus, Base, Community
 from sqlalchemy import func, text
 from sqlalchemy.orm import sessionmaker
 
