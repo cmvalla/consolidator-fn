@@ -78,6 +78,24 @@ class GraphProcessor:
         embeddings = np.array([e.get("ClusteringEmbedding") for e in clusterable_entities])
 
         valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None and len(emb) > 0]
+        
+        total_entities = len(clusterable_entities)
+        entities_with_embeddings = len(valid_indices)
+        entities_without_embeddings = total_entities - entities_with_embeddings
+
+        logging.info(f"Total clusterable entities: {total_entities}")
+        logging.info(f"Entities with embeddings: {entities_with_embeddings}")
+        logging.info(f"Entities without embeddings: {entities_without_embeddings}")
+
+        if entities_without_embeddings > 0:
+            missing_embedding_examples = []
+            for i, emb in enumerate(embeddings):
+                if emb is None or len(emb) == 0:
+                    missing_embedding_examples.append(clusterable_entities[i].get('id', 'N/A'))
+                if len(missing_embedding_examples) >= 5:
+                    break
+            logging.warning(f"Examples of entities missing embeddings: {missing_embedding_examples}")
+
         if len(valid_indices) < 2:
             logging.warning("Not enough entities with embeddings to perform clustering.")
             return data
