@@ -92,6 +92,10 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "EMBEDDING_SERVICE_URL"
           value = data.google_cloud_run_v2_service.embedding_service.uri
         }
+        env {
+          name  = "PERSISTOR_TOPIC_NAME"
+          value = var.persistor_topic_name
+        }
       }
   }
   depends_on = [

@@ -106,6 +106,11 @@ variable "spanner_database_id" {
   description = "The Spanner database ID."
 }
 
+variable "persistor_topic_name" {
+  type        = string
+  description = "The name of the Pub/Sub topic that triggers the persistor."
+}
+
 variable "use_gemini_embeddings" {
   description = "Set to true to use Gemini Embeddings (gemini-embeddings-001) instead of the external embedding service."
   type        = bool
