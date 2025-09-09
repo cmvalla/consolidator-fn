@@ -54,12 +54,12 @@ class SpannerOperations:
             logging.error(f"Error creating tables with SQLAlchemy ORM: {e}", exc_info=True)
             raise # Re-raise to prevent further execution with incomplete tables
 
-        # 2. Execute Spanner-specific DDL from schema.sql for graphs and vector indexes
+        # 2. Execute Spanner-specific DDL from spanner_extensions.sql for graphs and vector indexes
         try:
-            with open("schema.sql", "r") as f:
+            with open("spanner_extensions.sql", "r") as f:
                 ddl_statements = [statement.strip() for statement in f.read().split(';') if statement.strip()]
         except FileNotFoundError:
-            logging.error("schema.sql not found. Cannot ensure Spanner schema.")
+            logging.error("spanner_extensions.sql not found. Cannot ensure Spanner schema extensions.")
             return
 
         for ddl in ddl_statements:
@@ -106,7 +106,7 @@ class SpannerOperations:
                     logging.info(f"DDL statement for '{ddl_name}' skipped as it already exists.")
             else:
                 # Log if a DDL statement is not recognized as INDEX or GRAPH
-                logging.warning(f"Unrecognized DDL statement in schema.sql (skipping): {ddl}")
+                logging.warning(f"Unrecognized DDL statement in spanner_extensions.sql (skipping): {ddl}")
 
     def migrate_to_spanner(self, data):
         """Migrates the final graph data to Cloud Spanner using SQLAlchemy."""
