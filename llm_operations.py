@@ -67,7 +67,7 @@ class LLMOperations:
                 token = token_response.text
                 headers = {"Authorization": f"Bearer {token}"}
                 
-                    payload = {"text": text, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]}
+                payload = {"text": text, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]}
                 logging.info(f"Sending embedding request for entity {entity_id}: url={embedding_service_url}, payload={payload}, headers={{'Authorization': 'Bearer ...'}}")
                 response = requests.post(embedding_service_url, json=payload, headers=headers)
                 logging.info(f"Received raw embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
