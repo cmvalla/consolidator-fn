@@ -11,7 +11,6 @@ from google.cloud import pubsub_v1 # Added for Pub/Sub publishing
 from clients import ClientFactory
 from pubsub_handler import decode_pubsub_message
 from redis_operations import RedisOperations
-from spanner_operations import SpannerOperations
 from llm_operations import LLMOperations
 from graph_processing import GraphProcessor
 
@@ -23,23 +22,12 @@ logging.basicConfig(level=logging.DEBUG)
 # --- Global Client and Operations Initialization (executed once per instance) ---
 client_factory = ClientFactory()
 redis_client = client_factory.get_redis_client()
-db_session, db_engine = client_factory.get_db_session()
 llm = client_factory.get_llm()
 publisher = pubsub_v1.PublisherClient() # Added for Pub/Sub publishing
 
 redis_ops = RedisOperations(redis_client)
-spanner_ops = SpannerOperations(db_session, db_engine)
 llm_ops = LLMOperations(llm)
 graph_processor = GraphProcessor(llm_ops)
-
-# Ensure Spanner schema on startup
-try:
-    spanner_ops.ensure_spanner_schema()
-    logging.info("Spanner schema ensured successfully on startup.")
-except Exception as e:
-    logging.error(f"Failed to ensure Spanner schema on startup: {e}", exc_info=True)
-    # Depending on desired behavior, you might want to exit here or allow the function to proceed
-    # with potential database errors on invocation. For now, we'll just log.
 
 def aggregate_results(data):
     all_entities = {}
@@ -78,21 +66,6 @@ def consolidator(cloud_event):
 
         
 
-        consolidated_key = f"consolidated_batch:{batch_id}"
-        if redis_client.exists(consolidated_key):
-            logging.info(f"Consolidated data for batch {batch_id} found in Redis. Skipping processing chain and migrating directly to Spanner.")
-            redis_data = redis_client.hgetall(consolidated_key)
-            entities = json.loads(redis_data["entities"])
-            relationships = json.loads(redis_data["relationships"])
-            data_from_redis = {
-                "batch_id": batch_id,
-                "entities": entities,
-                "relationships": relationships
-            }
-            spanner_ops.migrate_to_spanner(data_from_redis)
-            spanner_ops.update_workflow_status(batch_id, "SUCCEEDED")
-            return None
-
         fetched_data = redis_ops.fetch_from_redis(data)
         if not fetched_data.get("partial_results"):
             logging.info(f"No data found in Redis for batch {data.get('batch_id')}. Stopping execution.")
@@ -121,13 +94,4 @@ def consolidator(cloud_event):
         batch_id = batch_id or (data and data.get("batch_id"))
         logging.error(f'An error occurred in the consolidator for batch_id {batch_id}: {e}', exc_info=True)
         
-        if batch_id:
-            try:
-                client_factory = ClientFactory()
-                db_session, db_engine = client_factory.get_db_session()
-                spanner_ops = SpannerOperations(db_session, db_engine)
-                spanner_ops.update_workflow_status(batch_id, "FAILED")
-            except Exception as spanner_e:
-                logging.error(f"Could not update workflow status for batch ID {batch_id} to FAILED: {spanner_e}", exc_info=True)
-
         return None
