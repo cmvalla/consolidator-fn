@@ -64,3 +64,8 @@ class Community(Base):
     Summary = Column(String)
     ClusteringEmbedding = Column(SpannerVectorArray(Float, vector_length=768))
     RetrievalDocumentEmbedding = Column(SpannerVectorArray(Float, vector_length=768))
+
+class EntityCommunity(Base):
+    __tablename__ = "EntityCommunity"
+    Eid = Column(String, ForeignKey("Entities.Eid"), primary_key=True)
+    CommunityId = Column(String, ForeignKey("Communities.CommunityId"), primary_key=True)
