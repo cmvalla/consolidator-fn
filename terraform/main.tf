@@ -45,30 +45,6 @@ resource "google_cloud_run_v2_service" "consolidator" {
         }
         
         env {
-          name  = "MEMGRAPH_HOST"
-          value = var.memgraph_host
-        }
-        env {
-          name  = "MEMGRAPH_PORT"
-          value = var.memgraph_port
-        }
-        env {
-          name  = "MEMGRAPH_USER"
-          value = var.memgraph_user
-        }
-        env {
-          name  = "MEMGRAPH_PASSWORD"
-          value = var.memgraph_password
-        }
-        env {
-          name  = "NEO4J_USERNAME"
-          value = var.memgraph_user
-        }
-        env {
-          name  = "NEO4J_PASSWORD"
-          value = var.memgraph_password
-        }
-        env {
           name  = "SPANNER_INSTANCE_ID"
           value = var.spanner_instance_id
         }
