@@ -59,7 +59,7 @@ def consolidator(cloud_event):
         redis_ops.save_processed_data(batch_id, community_data)
 
         # Publish message to trigger persistor function
-        project_id = os.environ.get("GCP_PROJECT") # Assuming project ID is available as an environment variable
+        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") # Assuming project ID is available as an environment variable
         topic_name = os.environ.get("PERSISTOR_TOPIC_NAME") # Get topic name from environment variable
         topic_path = publisher.topic_path(project_id, topic_name)
         
