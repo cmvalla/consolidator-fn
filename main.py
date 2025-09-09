@@ -1,8 +1,10 @@
 import functions_framework
 import logging
 import json
+import os # Added for environment variable access
 import psutil
 import google.cloud.logging
+from google.cloud import pubsub_v1 # Added for Pub/Sub publishing
 
 # Forced rebuild comment: 2025-09-07-4
 
@@ -23,6 +25,7 @@ client_factory = ClientFactory()
 redis_client = client_factory.get_redis_client()
 db_session, db_engine = client_factory.get_db_session()
 llm = client_factory.get_llm()
+publisher = pubsub_v1.PublisherClient() # Added for Pub/Sub publishing
 
 redis_ops = RedisOperations(redis_client)
 spanner_ops = SpannerOperations(db_session, db_engine)
@@ -88,12 +91,12 @@ def consolidator(cloud_event):
             }
             spanner_ops.migrate_to_spanner(data_from_redis)
             spanner_ops.update_workflow_status(batch_id, "SUCCEEDED")
-            return "OK", 200
+            return None
 
         fetched_data = redis_ops.fetch_from_redis(data)
         if not fetched_data.get("partial_results"):
             logging.info(f"No data found in Redis for batch {data.get('batch_id')}. Stopping execution.")
-            return "OK", 200
+            return None
 
         aggregated_data = graph_processor.aggregate_results(fetched_data)
         embedded_data = llm_ops.generate_embeddings(aggregated_data)
@@ -101,12 +104,19 @@ def consolidator(cloud_event):
         deduplicated_data = graph_processor.deduplicate_entities(clustered_data)
         community_data = graph_processor.run_igraph_community_detection(deduplicated_data)
         
-        redis_ops.store_consolidated_results_in_redis(community_data)
-        spanner_ops.migrate_to_spanner(community_data)
-        
-        spanner_ops.update_workflow_status(batch_id, "SUCCEEDED")
+        # Save processed data to Redis
+        redis_ops.save_processed_data(batch_id, community_data)
 
-        return "OK", 200
+        # Publish message to trigger persistor function
+        project_id = os.environ.get("GCP_PROJECT") # Assuming project ID is available as an environment variable
+        topic_name = os.environ.get("PERSISTOR_TOPIC_NAME") # Get topic name from environment variable
+        topic_path = publisher.topic_path(project_id, topic_name)
+        
+        future = publisher.publish(topic_path, json.dumps({"batch_id": batch_id}).encode("utf-8"))
+        future.result() # Wait for the publish call to complete
+        logging.info(f"Published message for batch {batch_id} to topic {topic_name}")
+
+        return None
     except Exception as e:
         batch_id = batch_id or (data and data.get("batch_id"))
         logging.error(f'An error occurred in the consolidator for batch_id {batch_id}: {e}', exc_info=True)
@@ -120,4 +130,4 @@ def consolidator(cloud_event):
             except Exception as spanner_e:
                 logging.error(f"Could not update workflow status for batch ID {batch_id} to FAILED: {spanner_e}", exc_info=True)
 
-        return "Internal Server Error", 500
+        return None
