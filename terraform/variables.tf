@@ -103,3 +103,9 @@ variable "gemini_api_key_secret_id" {
   type        = string
   default     = ""
 }
+
+variable "consolidator_max_workers" {
+  description = "The maximum number of worker threads for the consolidator function."
+  type        = number
+  default     = 5
+}

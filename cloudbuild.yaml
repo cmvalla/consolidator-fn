@@ -30,7 +30,7 @@ steps:
     gcloud secrets versions access latest --secret="consolidator-tfvars" --project="${_PROJECT_ID}" > terraform/terraform.tfvars
     cd terraform
     terraform init -backend-config="prefix=cloud-spanner-demo/${_PROJECT_SUFFIX}/consolidator"
-    terraform apply -auto-approve -var="image_tag=$BUILD_ID" -var="image_url=${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}"
+    terraform apply -auto-approve -var="image_tag=$BUILD_ID" -var="image_url=${_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY_ID}/${_IMAGE_NAME}" -var="consolidator_max_workers=${_CONSOLIDATOR_MAX_WORKERS}"
   waitFor: ['build-and-push']
 
 # Step 2B: Clean up old images (runs in parallel with deploy)
@@ -58,3 +58,4 @@ substitutions:
   _REPOSITORY_ID: 'my-docker-repo'
   _IMAGE_NAME: 'graphrag-fn-consolidator'
   _PROJECT_SUFFIX: '' # This will be overridden by the trigger
+  _CONSOLIDATOR_MAX_WORKERS: '5'

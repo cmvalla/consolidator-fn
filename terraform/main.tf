@@ -72,6 +72,10 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "PERSISTOR_TOPIC_NAME"
           value = var.persistor_topic_name
         }
+        env {
+          name  = "MAX_WORKERS"
+          value = var.consolidator_max_workers
+        }
       }
   }
   depends_on = [
