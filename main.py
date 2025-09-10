@@ -13,6 +13,7 @@ from pubsub_handler import decode_pubsub_message
 from redis_operations import RedisOperations
 from llm_operations import LLMOperations
 from graph_processing import GraphProcessor
+from spanner_operations import SpannerOperations
 
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
@@ -28,10 +29,12 @@ def consolidator(cloud_event):
         redis_client = client_factory.get_redis_client()
         llm = client_factory.get_llm()
         publisher = pubsub_v1.PublisherClient()
+        spanner_client = client_factory.get_spanner_client()
 
         redis_ops = RedisOperations(redis_client)
         llm_ops = LLMOperations(llm)
         graph_processor = GraphProcessor(llm_ops)
+        spanner_ops = SpannerOperations(spanner_client, os.environ.get("SPANNER_INSTANCE_ID"), os.environ.get("SPANNER_DATABASE_ID"))
 
         # Log system resource usage
         cpu_usage = psutil.cpu_percent(interval=1)
@@ -42,32 +45,42 @@ def consolidator(cloud_event):
         data = decode_pubsub_message(cloud_event)
         batch_id = data.get("batch_id")
 
-        
+        instance_id = os.environ.get("GAE_INSTANCE") # Unique ID for the instance
 
-        fetched_data = redis_ops.fetch_from_redis(data)
-        if not fetched_data.get("partial_results"):
-            logging.info(f"No data found in Redis for batch {data.get('batch_id')}. Stopping execution.")
-            return None
+        if not spanner_ops.acquire_lock(batch_id, instance_id):
+            return None # Another instance is processing this batch
 
-        aggregated_data = graph_processor.aggregate_results(fetched_data)
-        embedded_data = llm_ops.generate_embeddings(aggregated_data)
-        clustered_data = graph_processor.cluster_and_merge_entities(embedded_data)
-        deduplicated_data = graph_processor.deduplicate_entities(clustered_data)
-        community_data = graph_processor.run_igraph_community_detection(deduplicated_data)
-        
-        # Save processed data to Redis
-        redis_ops.save_processed_data(batch_id, community_data)
+        try:
+            fetched_data = redis_ops.fetch_from_redis(data)
+            if not fetched_data.get("partial_results"):
+                logging.info(f"No data found in Redis for batch {data.get('batch_id')}. Stopping execution.")
+                spanner_ops.release_lock(batch_id, "FAILED")
+                return None
 
-        # Publish message to trigger persistor function
-        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") # Assuming project ID is available as an environment variable
-        topic_name = os.environ.get("PERSISTOR_TOPIC_NAME") # Get topic name from environment variable
-        topic_path = publisher.topic_path(project_id, topic_name)
-        
-        future = publisher.publish(topic_path, json.dumps({"batch_id": batch_id}).encode("utf-8"))
-        future.result() # Wait for the publish call to complete
-        logging.info(f"Published message for batch {batch_id} to topic {topic_name}")
+            aggregated_data = graph_processor.aggregate_results(fetched_data)
+            embedded_data = llm_ops.generate_embeddings(aggregated_data)
+            clustered_data = graph_processor.cluster_and_merge_entities(embedded_data)
+            deduplicated_data = graph_processor.deduplicate_entities(clustered_data)
+            community_data = graph_processor.run_igraph_community_detection(deduplicated_data)
+            
+            # Save processed data to Redis
+            redis_ops.save_processed_data(batch_id, community_data)
 
-        return None
+            # Publish message to trigger persistor function
+            project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") # Assuming project ID is available as an environment variable
+            topic_name = os.environ.get("PERSISTOR_TOPIC_NAME") # Get topic name from environment variable
+            topic_path = publisher.topic_path(project_id, topic_name)
+            
+            future = publisher.publish(topic_path, json.dumps({"batch_id": batch_id}).encode("utf-8"))
+            future.result() # Wait for the publish call to complete
+            logging.info(f"Published message for batch {batch_id} to topic {topic_name}")
+
+            spanner_ops.release_lock(batch_id, "COMPLETED")
+
+        except Exception as e:
+            logging.error(f'An error occurred while processing batch {batch_id}: {e}', exc_info=True)
+            spanner_ops.release_lock(batch_id, "FAILED")
+            raise e # Re-raise the exception to trigger a retry if configured
     except Exception as e:
         batch_id = batch_id or (data and data.get("batch_id"))
         logging.error(f'An error occurred in the consolidator for batch_id {batch_id}: {e}', exc_info=True)

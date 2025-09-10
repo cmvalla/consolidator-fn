@@ -5,6 +5,7 @@ import google.cloud.secretmanager as secretmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from langchain_google_genai import ChatGoogleGenerativeAI
+from google.cloud.spanner_v1 import Client as SpannerClient
 
 from config import Config
 
@@ -15,6 +16,12 @@ class ClientFactory:
         self._db_session = None
         self._db_engine = None
         self._sm_client = None
+        self._spanner_client = None
+
+    def get_spanner_client(self):
+        if self._spanner_client is None:
+            self._spanner_client = SpannerClient()
+        return self._spanner_client
 
     def get_sm_client(self):
         if self._sm_client is None:
