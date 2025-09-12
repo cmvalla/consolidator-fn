@@ -1,6 +1,6 @@
 
 import logging
-from google.cloud.spanner_v1 import Client, KeySet
+from google.cloud.spanner_v1 import Client, KeySet, COMMIT_TIMESTAMP
 from google.cloud.spanner_v1.transaction import Transaction
 from google.cloud.spanner_v1.keyset import KeySet
 from google.api_core.exceptions import Aborted, NotFound
@@ -32,7 +32,7 @@ class SpannerOperations:
                     transaction.insert(
                         table="WorkflowStatus",
                         columns=["batch_id", "status", "lock_owner", "lock_timestamp"],
-                        values=[[batch_id, "PROCESSING", instance_id, "PENDING_COMMIT_TIMESTAMP()"]],
+                        values=[[batch_id, "PROCESSING", instance_id, COMMIT_TIMESTAMP]],
                     )
                     return True
                 
@@ -50,7 +50,7 @@ class SpannerOperations:
                         transaction.update(
                             table="WorkflowStatus",
                             columns=["batch_id", "status", "lock_owner", "lock_timestamp"],
-                            values=[[batch_id, "PROCESSING", instance_id, "PENDING_COMMIT_TIMESTAMP()"]],
+                            values=[[batch_id, "PROCESSING", instance_id, COMMIT_TIMESTAMP]],
                         )
                         return True
                     else:
@@ -62,7 +62,7 @@ class SpannerOperations:
                     transaction.update(
                         table="WorkflowStatus",
                         columns=["batch_id", "status", "lock_owner", "lock_timestamp"],
-                        values=[[batch_id, "PROCESSING", instance_id, "PENDING_COMMIT_TIMESTAMP()"]],
+                        values=[[batch_id, "PROCESSING", instance_id, COMMIT_TIMESTAMP]],
                     )
                     return True
 
@@ -73,7 +73,7 @@ class SpannerOperations:
                 transaction.insert(
                     table="WorkflowStatus",
                     columns=["batch_id", "status", "lock_owner", "lock_timestamp"],
-                    values=[[batch_id, "PROCESSING", instance_id, "PENDING_COMMIT_TIMESTAMP()"]],
+                    values=[[batch_id, "PROCESSING", instance_id, COMMIT_TIMESTAMP]],
                 )
                 return True
 
