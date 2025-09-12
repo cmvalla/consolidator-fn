@@ -25,7 +25,7 @@ class SpannerOperations:
                     keyset=KeySet(keys=[[batch_id]]),
                     columns=["status", "lock_owner", "lock_timestamp"],
                 )
-                row = next(result, None)
+                row = next(iter(result), None)
 
                 if row is None:
                     # No lock exists, acquire it
