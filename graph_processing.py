@@ -133,81 +133,106 @@ class GraphProcessor:
         name_to_class_entity = {}
         class_id_map = {}
 
-        with ThreadPoolExecutor(max_workers=Config.MAX_WORKERS) as executor:
-            future_to_cluster = {}
-            for cluster_member_ids in clusters:
-                instances_text_parts = []
-                source_text_parts = set()
-                cluster_text_parts = []
+        batched_llm_inputs = []
+        cluster_info_list = [] # To store info for mapping results back to original clusters
 
-                for member_id in cluster_member_ids:
-                    member_entity = id_to_entity.get(member_id)
-                    if member_entity:
-                        properties = member_entity.get('properties', {})
-                        instances_text_parts.append(f"- {json.dumps(properties)}")
-                        source_text = entity_id_to_source_text.get(member_id)
-                        if source_text:
-                            source_text_parts.add(source_text)
-                        
-                        entity_type = member_entity.get('type', '')
-                        cluster_text_parts.append(f"Type: {entity_type}, Properties: {json.dumps(properties)}")
+        for cluster_member_ids in clusters:
+            instances_text_parts = []
+            source_text_parts = set()
+            cluster_text_parts = []
 
-                instances_text = "\n".join(instances_text_parts)
-                source_text_context = "\n\n---\n\n".join(source_text_parts)
-                schema_str = json.dumps(CLASS_SCHEMA, indent=2)
+            for member_id in cluster_member_ids:
+                member_entity = id_to_entity.get(member_id)
+                if member_entity:
+                    properties = member_entity.get('properties', {})
+                    instances_text_parts.append(f"- {json.dumps(properties)}")
+                    source_text = entity_id_to_source_text.get(member_id)
+                    if source_text:
+                        source_text_parts.add(source_text)
+                    
+                    entity_type = member_entity.get('type', '')
+                    cluster_text_parts.append(f"Type: {entity_type}, Properties: {json.dumps(properties)}")
+
+            instances_text = "\n".join(instances_text_parts)
+            source_text_context = "\n\n---\n\n".join(source_text_parts)
+            schema_str = json.dumps(CLASS_SCHEMA, indent=2)
+            
+            batched_llm_inputs.append({
+                "instances_text": instances_text,
+                "schema_str": schema_str,
+                "source_text_context": source_text_context
+            })
+            cluster_info_list.append({
+                "member_ids": cluster_member_ids,
+                "cluster_text": " ".join(cluster_text_parts)
+            })
+
+        processed_clusters = 0
+        total_clusters = len(clusters)
+        all_generated_properties = []
+
+        for i in range(0, total_clusters, Config.LLM_BATCH_SIZE):
+            batch_inputs = batched_llm_inputs[i:i + Config.LLM_BATCH_SIZE]
+            batch_cluster_info = cluster_info_list[i:i + Config.LLM_BATCH_SIZE]
+
+            try:
+                # Call the LLM with the batched inputs
+                generated_properties_str = self.llm_ops.generate_class_properties(class_property_chain, batch_inputs, schema_str)
+                extracted_json_str = self.llm_ops.extract_json_from_llm_response(generated_properties_str)
+                batch_generated_properties = json.loads(extracted_json_str)
                 
-                future = executor.submit(self.llm_ops.generate_class_properties, class_property_chain, instances_text, schema_str, source_text_context)
-                future_to_cluster[future] = {
-                    "member_ids": cluster_member_ids,
-                    "cluster_text": " ".join(cluster_text_parts)
-                }
-
-            processed_clusters = 0
-            total_clusters = len(clusters)
-            for future in as_completed(future_to_cluster):
-                cluster_info = future_to_cluster[future]
-                cluster_member_ids = cluster_info["member_ids"]
-                processed_clusters += 1
-                try:
-                    generated_properties_str = future.result()
-                    extracted_json_str = self.llm_ops.extract_json_from_llm_response(generated_properties_str)
-                    generated_properties = json.loads(extracted_json_str)
-                    class_name = generated_properties.get("name")
-                    if not class_name or not class_name.strip():
-                        logging.warning(f"Skipping class creation for cluster due to empty class name. Cluster info: {cluster_info}")
-                        continue
-                    class_eid = generate_class_eid(class_name)
-
-                    if not class_eid:
-                        logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
-                        continue
-
-                    if class_name in name_to_class_entity:
-                        existing_class_eid = name_to_class_entity[class_name]["id"]
-                        for member_id in cluster_member_ids:
-                            class_id_map[member_id] = existing_class_eid
-                        logging.info(f"Merged cluster into existing class '{class_name}' (ID: {existing_class_eid})")
-                    else:
-                        summary = summarization_chain.invoke({"text_chunk": cluster_info["cluster_text"]}).get("text")
-                        all_embeddings = self.llm_ops._get_single_embedding(summary, class_eid)
-                        class_entity = {
-                            "id": class_eid,
-                            "type": "Class",
-                            "properties": generated_properties,
-                            "clustering_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
-                            "retrieval_document_embedding": all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
-                        }
-                        name_to_class_entity[class_name] = class_entity
-                        for member_id in cluster_member_ids:
-                            class_id_map[member_id] = class_eid
-                        logging.info(f"Created new class '{class_name}' (ID: {class_eid})")
-
-                except Exception as e:
-                    logging.error(f"Failed to process future for cluster: {e}", exc_info=True)
+                if not isinstance(batch_generated_properties, list):
+                    logging.error(f"LLM did not return a list of properties for batch starting at index {i}. Response: {extracted_json_str}")
+                    batch_generated_properties = [{{}} for _ in batch_inputs] # Fill with empty dicts to avoid index errors
                 
-                if total_clusters > 0 and processed_clusters % (total_clusters // 10 or 1) == 0:
-                    progress = (processed_clusters / total_clusters) * 100
-                    logging.info(f"Class property generation progress: {progress:.0f}% ({processed_clusters}/{total_clusters})")
+                all_generated_properties.extend(batch_generated_properties)
+
+            except Exception as e:
+                logging.error(f"Failed to process LLM batch starting at index {i}: {e}", exc_info=True)
+                all_generated_properties.extend([{{}} for _ in batch_inputs]) # Fill with empty dicts on error
+
+            processed_clusters += len(batch_inputs)
+            if total_clusters > 0 and processed_clusters % (total_clusters // 10 or 1) == 0:
+                progress = (processed_clusters / total_clusters) * 100
+                logging.info(f"Class property generation progress: {progress:.0f}% ({processed_clusters}/{total_clusters})")
+
+        for idx, generated_properties in enumerate(all_generated_properties):
+            cluster_info = cluster_info_list[idx]
+            cluster_member_ids = cluster_info["member_ids"]
+            
+            try:
+                class_name = generated_properties.get("name")
+                if not class_name or not class_name.strip():
+                    logging.warning(f"Skipping class creation for cluster due to empty class name. Cluster info: {cluster_info}")
+                    continue
+                class_eid = generate_class_eid(class_name)
+
+                if not class_eid:
+                    logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
+                    continue
+
+                if class_name in name_to_class_entity:
+                    existing_class_eid = name_to_class_entity[class_name]["id"]
+                    for member_id in cluster_member_ids:
+                        class_id_map[member_id] = existing_class_eid
+                    logging.info(f"Merged cluster into existing class '{class_name}' (ID: {existing_class_eid})")
+                else:
+                    summary = self.llm_ops.llm.invoke({"text_chunk": cluster_info["cluster_text"]}).get("text")
+                    all_embeddings = self.llm_ops._get_single_embedding(summary, class_eid)
+                    class_entity = {
+                        "id": class_eid,
+                        "type": "Class",
+                        "properties": generated_properties,
+                        "clustering_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
+                        "retrieval_document_embedding": all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
+                    }
+                    name_to_class_entity[class_name] = class_entity
+                    for member_id in cluster_member_ids:
+                        class_id_map[member_id] = class_eid
+                    logging.info(f"Created new class '{class_name}' (ID: {class_eid})")
+
+            except Exception as e:
+                logging.error(f"Failed to process generated properties for cluster {cluster_info}: {e}", exc_info=True)
 
 
         new_entities = list(name_to_class_entity.values())

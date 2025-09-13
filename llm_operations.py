@@ -23,16 +23,17 @@ CLASS_SCHEMA = {
 }
 
 CLASS_PROPERTY_GENERATION_PROMPT = PromptTemplate(
-    template="You are a knowledge graph expert. Your task is to define a 'Class' that represents a collection of similar 'Instance' entities. "
-    "The goal is to find the most specific, meaningful classification for the instances based *only* on the provided context. "
+    template="You are a knowledge graph expert. Your task is to define 'Class' entities, each representing a collection of similar 'Instance' entities. "
+    "The goal is to find the most specific, meaningful classification for each set of instances based *only* on their provided context. "
     "- **Specificity is key:** Do not generalize to high-level categories like 'Fairy Tale Character' if a more specific class like 'Wolf' or 'Antagonist' is appropriate within the source text. "
-    "- **Use the context:** The 'Class' name and description should be grounded in the 'Instances' and the 'Source Text' provided. "
-    "- **Create a Schema:** Generate a JSON object for the 'Class' that adheres to the following JSON schema:\n\n"
+    "- **Use the context:** Each 'Class' name and description should be grounded in its respective 'Instances' and 'Source Text'. "
+    "- **Create a Schema:** Generate a a JSON object for each 'Class' that adheres to the following JSON schema:\n\n"
     "```json\n{schema}\n```\n\n"
-    "Instances (as JSON objects):\n{instances_text}\n\n"
-    "Source Text (for context):\n{source_text}\n\n"
-    "Respond with a single, valid JSON object for the 'Class' entity.",
-    input_variables=["instances_text", "schema", "source_text"]
+    "You will be provided with a JSON array of objects, where each object contains 'instances_text' and 'source_text' for a single cluster. "
+    "Your response MUST be a single, valid JSON array of 'Class' entities, corresponding to the input clusters in order.\n\n"
+    "Input Clusters (as JSON array of objects):\n{batched_clusters_json}\n\n"
+    "Respond with a single, valid JSON array of 'Class' entities.",
+    input_variables=["batched_clusters_json", "schema"]
 )
 
 SUMMARY_PROMPT = PromptTemplate.from_template(
@@ -231,11 +232,15 @@ class LLMOperations:
 
         return data
 
-    def generate_class_properties(self, class_property_chain, instances_text, schema, source_text):
-        """Helper function to run LLM chain in a thread, with logging."""
-        prompt = CLASS_PROPERTY_GENERATION_PROMPT.format(instances_text=instances_text, schema=schema, source_text=source_text)
-        logging.info(f"Querying LLM for class properties. Prompt length: {len(prompt)}. Prompt:\n{prompt}")
-        response = class_property_chain.invoke({"instances_text": instances_text, "schema": schema, "source_text": source_text}).get("text")
+    def generate_class_properties(self, batched_clusters_data, schema):
+        """Generates class properties for a batch of clusters using the LLM."""
+        batched_clusters_json = json.dumps(batched_clusters_data, indent=2)
+        prompt_inputs = {"batched_clusters_json": batched_clusters_json, "schema": schema}
+        
+        class_property_chain = LLMChain(llm=self.llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
+
+        logging.info(f"Querying LLM for class properties. Prompt length: {len(prompt_inputs['batched_clusters_json'])}. Prompt:\n{CLASS_PROPERTY_GENERATION_PROMPT.format(**prompt_inputs)}")
+        response = class_property_chain.invoke(prompt_inputs).get("text")
         logging.info(f"LLM response for class properties: {response}")
         return response
 
