@@ -30,13 +30,18 @@ class RedisOperations:
         return data
 
     def save_processed_data(self, batch_id, data):
-        """Stores the processed entities and relationships in Redis for later retrieval by the persistor."""
+        """Stores the processed graph data in Redis for later retrieval by the persistor."""
         processed_key = f"processed_batch:{batch_id}"
         try:
-            self.redis_client.hset(processed_key, mapping={
-                "entities": json.dumps(data["entities"]),
-                "relationships": json.dumps(data["relationships"])
-            })
+            # Ensure all expected keys are present, providing an empty list as a default
+            mapping_data = {
+                "entities": json.dumps(data.get("entities", [])),
+                "relationships": json.dumps(data.get("relationships", [])),
+                "instance_of": json.dumps(data.get("instance_of", [])),
+                "communities": json.dumps(data.get("communities", [])),
+                "entity_community": json.dumps(data.get("entity_community", []))
+            }
+            self.redis_client.hset(processed_key, mapping=mapping_data)
             self.redis_client.expire(processed_key, 86400) # Expire after 24 hours
             logging.info(f"Stored processed data for batch {batch_id} in Redis.")
         except Exception as e:
