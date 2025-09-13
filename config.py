@@ -11,4 +11,6 @@ class Config:
     GEMINI_API_KEY_SECRET_ID = os.environ.get("GEMINI_API_KEY_SECRET_ID")
     EMBEDDING_SERVICE_URL = os.environ.get("EMBEDDING_SERVICE_URL")
     MAX_WORKERS = int(os.environ.get("MAX_WORKERS", 5))
+    LLM_BATCH_SIZE = int(os.environ.get("LLM_BATCH_SIZE", 10)) # New: Batch size for LLM calls
+    LLM_MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "gemini-2.5-flash")
     EMBEDDING_DIMENSION = 768

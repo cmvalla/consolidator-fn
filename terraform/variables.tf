@@ -1,111 +1,79 @@
 variable "project_id" {
+  description = "The Google Cloud project ID."
   type        = string
-  description = "The GCP project ID."
-}
-
-variable "region" {
-  type        = string
-  description = "The GCP region."
 }
 
 variable "location" {
+  description = "The GCP region for the Cloud Run service."
   type        = string
-  description = "The GCP location."
-}
-
-variable "repository_id" {
-  type        = string
-  description = "The Artifact Registry repository ID."
-}
-
-variable "image_name" {
-  type        = string
-  description = "The name of the Docker image."
-}
-
-variable "image_tag" {
-  type        = string
-  description = "The tag of the Docker image, typically the Build ID."
-}
-
-variable "image_url" {
-  type        = string
-  description = "The full URL of the Docker image."
-}
-
-variable "topic_resource_id" {
-  type        = string
-  description = "The resource ID of the Pub/Sub topic that triggers the consolidator."
 }
 
 variable "consolidator_sa_email" {
+  description = "Service account email for the consolidator function."
   type        = string
-  description = "The email of the consolidator service account."
 }
 
-variable "consolidator_sa_roles" {
-  type = list(string)
-  description = "Project-level IAM roles for the consolidator service account"
-  default = [
-    "roles/run.invoker",
-    "roles/eventarc.eventReceiver",
-    "roles/serviceusage.serviceUsageConsumer",
-    "roles/cloudtrace.agent"
-  ]
+variable "vpc_connector" {
+  description = "The VPC Access connector to use for the Cloud Run service."
+  type        = string
+}
+
+variable "image_url" {
+  description = "The URL of the Docker image for the consolidator function."
+  type        = string
+}
+
+variable "image_tag" {
+  description = "The tag for the Docker image."
+  type        = string
 }
 
 variable "redis_host" {
-  type        = string
   description = "The Redis host."
+  type        = string
 }
 
 variable "redis_port" {
-  type        = string
   description = "The Redis port."
-}
-
-
-
-
-
-variable "vpc_connector" {
-  type        = string
-  description = "The Serverless VPC Access connector name."
-}
-variable "topic_name" {
-  type        = string
-  description = "The name of the Pub/Sub topic."
+  type        = number
 }
 
 variable "spanner_instance_id" {
-  type        = string
   description = "The Spanner instance ID."
+  type        = string
 }
 
 variable "spanner_database_id" {
-  type        = string
   description = "The Spanner database ID."
-}
-
-variable "persistor_topic_name" {
   type        = string
-  description = "The name of the Pub/Sub topic that triggers the persistor."
-}
-
-variable "use_gemini_embeddings" {
-  description = "Set to true to use Gemini Embeddings (gemini-embeddings-001) instead of the external embedding service."
-  type        = bool
-  default     = false
 }
 
 variable "gemini_api_key_secret_id" {
-  description = "The secret ID for the Gemini API key."
+  description = "The Secret Manager ID for the Gemini API key."
   type        = string
-  default     = ""
+}
+
+variable "embedding_service_url" {
+  description = "The URL of the embedding service."
+  type        = string
+}
+
+variable "persistor_topic_name" {
+  description = "The name of the Pub/Sub topic for the persistor function."
+  type        = string
 }
 
 variable "consolidator_max_workers" {
   description = "The maximum number of worker threads for the consolidator function."
   type        = number
-  default     = 5
+}
+
+variable "topic_name" {
+  description = "The name of the Pub/Sub topic for the consolidator function."
+  type        = string
+}
+
+variable "llm_model_name" {
+  description = "The name of the LLM model to use for the consolidator function."
+  type        = string
 }

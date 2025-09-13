@@ -76,6 +76,10 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "MAX_WORKERS"
           value = var.consolidator_max_workers
         }
+        env {
+          name  = "LLM_MODEL_NAME"
+          value = var.llm_model_name
+        }
       }
   }
   depends_on = [
