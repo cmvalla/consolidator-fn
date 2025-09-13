@@ -42,6 +42,15 @@ class SpannerOperations:
                     logging.info(f"Batch {batch_id} has already been processed.")
                     return False
 
+                if status == "PENDING_CONSOLIDATION":
+                    logging.info(f"Batch {batch_id} is pending consolidation. Acquiring lock.")
+                    transaction.update(
+                        table="WorkflowStatus",
+                        columns=["batch_id", "status", "lock_owner", "lock_timestamp"],
+                        values=[[batch_id, "PROCESSING", instance_id, COMMIT_TIMESTAMP]],
+                    )
+                    return True
+
                 if status == "PROCESSING":
                     # Check for lock expiration
                     # This is a simplified example, you might want to use a more robust time comparison
