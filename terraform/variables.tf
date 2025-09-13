@@ -8,6 +8,11 @@ variable "location" {
   type        = string
 }
 
+variable "region" {
+  description = "The GCP region for the Cloud Run service."
+  type        = string
+}
+
 variable "consolidator_sa_email" {
   description = "Service account email for the consolidator function."
   type        = string
@@ -71,6 +76,11 @@ variable "consolidator_max_workers" {
 variable "topic_name" {
   description = "The name of the Pub/Sub topic for the consolidator function."
   type        = string
+}
+
+variable "use_gemini_embeddings" {
+  description = "Set to true to use Gemini Embeddings (gemini-embeddings-001) instead of the external embedding service."
+  type        = bool
 }
 
 variable "llm_model_name" {
