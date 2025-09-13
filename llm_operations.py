@@ -215,7 +215,7 @@ class LLMOperations:
                 entities[i]['semantic_search_embedding'] = [0.0] * Config.EMBEDDING_DIMENSION
 
         # Batching logic
-        batch_size = 10 # Define a suitable batch size
+        batch_size = 50 # Define a suitable batch size
         all_entity_ids = list(texts_to_embed_map.keys())
         
         for i in range(0, len(all_entity_ids), batch_size):
