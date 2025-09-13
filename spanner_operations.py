@@ -20,6 +20,7 @@ class SpannerOperations:
         Returns True if the lock was acquired, False otherwise.
         """
         def _acquire_lock_in_transaction(transaction: Transaction) -> bool:
+            logging.info(f"Acquiring lock for batch_id: {batch_id}, instance_id: {instance_id}")
             try:
                 result = transaction.read(
                     table="WorkflowStatus",
@@ -27,9 +28,11 @@ class SpannerOperations:
                     columns=["status", "lock_owner", "lock_timestamp"],
                 )
                 row = next(iter(result), None)
+                logging.info(f"Read result for batch_id {batch_id}: {row}")
 
                 if row is None:
                     # No lock exists, acquire it
+                    logging.info(f"No existing lock for batch {batch_id}. Acquiring new lock.")
                     transaction.insert(
                         table="WorkflowStatus",
                         columns=["batch_id", "status", "lock_owner", "lock_timestamp"],
@@ -39,6 +42,7 @@ class SpannerOperations:
                 
                 status, lock_owner, lock_timestamp = row
                 
+                logging.info(f"Current status for batch {batch_id}: status={status}, lock_owner={lock_owner}, lock_timestamp={lock_timestamp}")
                 if status == "COMPLETED":
                     logging.info(f"Batch {batch_id} has already been processed.")
                     return False
