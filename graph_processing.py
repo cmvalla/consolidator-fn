@@ -22,15 +22,24 @@ class GraphProcessor:
         all_entities = {}
         all_relationships = []
         for res_str in data["partial_results"]:
+            logging.debug(f"Processing res_str: {res_str}")
             res_json = json.loads(res_str)
-            for entity in res_json.get("extracted_graph_data", {}).get("entities", []):
+            logging.debug(f"Decoded res_json: {res_json}")
+            
+            extracted_entities = res_json.get("extracted_graph_data", {}).get("entities", [])
+            extracted_relationships = res_json.get("extracted_graph_data", {}).get("relationships", [])
+            
+            logging.debug(f"Extracted entities from res_json: {extracted_entities}")
+            logging.debug(f"Extracted relationships from res_json: {extracted_relationships}")
+
+            for entity in extracted_entities:
                 entity_id = entity.get("id")
                 if entity_id:
                     all_entities[entity_id] = entity
                 else:
                     logging.warning(f"Skipping entity without id: {entity}")
             # Process relationships to ensure 'source' and 'target' keys are present
-            for rel in res_json.get("extracted_graph_data", {}).get("relationships", []):
+            for rel in extracted_relationships:
                 if "id_1" in rel and "id_2" in rel:
                     rel["source"] = rel.pop("id_1") # Rename id_1 to source
                     rel["target"] = rel.pop("id_2") # Rename id_2 to target
