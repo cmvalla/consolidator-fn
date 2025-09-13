@@ -41,6 +41,7 @@ class RedisOperations:
                 "communities": json.dumps(data.get("communities", [])),
                 "entity_community": json.dumps(data.get("entity_community", []))
             }
+            logging.info(f"Storing processed data for batch {batch_id} in Redis with key {processed_key}. Data: {mapping_data}")
             self.redis_client.hset(processed_key, mapping=mapping_data)
             self.redis_client.expire(processed_key, 86400) # Expire after 24 hours
             logging.info(f"Stored processed data for batch {batch_id} in Redis.")
