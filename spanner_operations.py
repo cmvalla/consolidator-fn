@@ -1,5 +1,6 @@
 
 import logging
+import datetime
 from google.cloud.spanner_v1 import Client, KeySet, COMMIT_TIMESTAMP
 from google.cloud.spanner_v1.transaction import Transaction
 from google.cloud.spanner_v1.keyset import KeySet
