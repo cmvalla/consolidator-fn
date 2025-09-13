@@ -73,6 +73,11 @@ variable "consolidator_max_workers" {
   type        = number
 }
 
+variable "llm_batch_size" {
+  description = "The batch size for LLM calls in the consolidator function."
+  type        = number
+}
+
 variable "topic_name" {
   description = "The name of the Pub/Sub topic for the consolidator function."
   type        = string
