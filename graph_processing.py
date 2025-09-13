@@ -177,7 +177,7 @@ class GraphProcessor:
 
             try:
                 # Call the LLM with the batched inputs
-                generated_properties_str = self.llm_ops.generate_class_properties(class_property_chain, batch_inputs, schema_str)
+                generated_properties_str = self.llm_ops.generate_class_properties(batch_inputs, CLASS_SCHEMA)
                 extracted_json_str = self.llm_ops.extract_json_from_llm_response(generated_properties_str)
                 batch_generated_properties = json.loads(extracted_json_str)
                 
