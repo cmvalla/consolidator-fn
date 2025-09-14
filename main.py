@@ -74,14 +74,15 @@ def consolidator(cloud_event):
             clustered_data = graph_processor.cluster_and_merge_entities(embedded_data)
             deduplicated_data = graph_processor.deduplicate_entities(clustered_data)
             community_data = graph_processor.run_igraph_community_detection(deduplicated_data)
+            new_community_data = graph_processor.remove_entities_with_null_keys_and_relationships(community_data)
             
             # Save processed data to Redis (REMOVED)
             # redis_ops.save_processed_data(batch_id, community_data)
 
             # Serialize igraph object and upload to GCS
-            if community_data:
+            if new_community_data:
                 try:
-                    serialized_graph = pickle.dumps(community_data)
+                    serialized_graph = pickle.dumps(new_community_data)
                     
                     gcs_bucket_name = os.environ.get("GRAPH_DATA_BUCKET_NAME")
                     if not gcs_bucket_name:

@@ -440,6 +440,40 @@ class GraphProcessor:
         logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(community_summaries)} standard Community entities.")
         return data
 
+    def remove_entities_with_null_keys_and_relationships(self, data):
+        logging.info("Starting removal of entities with null/empty IDs and their relationships...")
+        entities = data.get("entities", [])
+        relationships = data.get("relationships", [])
+
+        entities_to_remove_ids = set()
+        cleaned_entities = []
+
+        for entity in entities:
+            entity_id = entity.get("id")
+            if entity_id is None or str(entity_id).strip() == "":
+                entities_to_remove_ids.add(entity_id)
+                logging.warning(f"Removing entity with null/empty ID: {entity}")
+            else:
+                cleaned_entities.append(entity)
+        
+        if not entities_to_remove_ids:
+            logging.info("No entities with null/empty IDs found. Skipping relationship filtering.")
+            return data
+
+        cleaned_relationships = []
+        for rel in relationships:
+            source_id = rel.get("source")
+            target_id = rel.get("target")
+            if source_id in entities_to_remove_ids or target_id in entities_to_remove_ids:
+                logging.warning(f"Removing relationship connected to null/empty ID entity: {rel}")
+            else:
+                cleaned_relationships.append(rel)
+
+        data["entities"] = cleaned_entities
+        data["relationships"] = cleaned_relationships
+        logging.info(f"Finished removal. {len(entities) - len(cleaned_entities)} entities and {len(relationships) - len(cleaned_relationships)} relationships removed.")
+        return data
+
 def generate_class_eid(name):
     """Creates a consistent and unique ID from a string using SHA256 hash."""
     if not name:
