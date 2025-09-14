@@ -5,6 +5,9 @@ import os # Added for environment variable access
 import psutil
 import google.cloud.logging
 from google.cloud import pubsub_v1 # Added for Pub/Sub publishing
+import pickle # Added for igraph serialization
+from google.cloud import storage # Added for GCS operations
+import datetime # Added for timestamp in GCS object name
 
 # Forced rebuild comment: 2025-09-07-4
 
@@ -45,6 +48,15 @@ def consolidator(cloud_event):
         data = decode_pubsub_message(cloud_event)
         batch_id = data.get("batch_id")
 
+        persistor_topic_name = os.environ.get("PERSISTOR_TOPIC_NAME")
+        if not persistor_topic_name:
+            logging.error("PERSISTOR_TOPIC_NAME environment variable not set.")
+            if batch_id:
+                spanner_ops.release_lock(batch_id, "FAILED")
+            return None
+        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        topic_path = publisher.topic_path(project_id, persistor_topic_name)
+
         instance_id = os.environ.get("GAE_INSTANCE") # Unique ID for the instance
 
         if not spanner_ops.acquire_lock(batch_id, instance_id):
@@ -63,17 +75,49 @@ def consolidator(cloud_event):
             deduplicated_data = graph_processor.deduplicate_entities(clustered_data)
             community_data = graph_processor.run_igraph_community_detection(deduplicated_data)
             
-            # Save processed data to Redis
-            redis_ops.save_processed_data(batch_id, community_data)
+            # Save processed data to Redis (REMOVED)
+            # redis_ops.save_processed_data(batch_id, community_data)
 
-            # Publish message to trigger persistor function
-            project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") # Assuming project ID is available as an environment variable
-            topic_name = os.environ.get("PERSISTOR_TOPIC_NAME") # Get topic name from environment variable
-            topic_path = publisher.topic_path(project_id, topic_name)
-            
-            future = publisher.publish(topic_path, json.dumps({"batch_id": batch_id}).encode("utf-8"))
-            future.result() # Wait for the publish call to complete
-            logging.info(f"Published message for batch {batch_id} to topic {topic_name}")
+            # Serialize igraph object and upload to GCS
+            if community_data:
+                try:
+                    serialized_graph = pickle.dumps(community_data)
+                    
+                    gcs_bucket_name = os.environ.get("GRAPH_DATA_BUCKET_NAME")
+                    if not gcs_bucket_name:
+                        logging.error("GRAPH_DATA_BUCKET_NAME environment variable not set.")
+                        spanner_ops.release_lock(batch_id, "FAILED")
+                        return None
+
+                    storage_client = storage.Client()
+                    bucket = storage_client.bucket(gcs_bucket_name)
+                    
+                    # Generate a unique object name
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    object_name = f"graph_data/{batch_id.replace('/', '_').replace(':', '_')}_{timestamp}.pkl"
+                    blob = bucket.blob(object_name)
+                    
+                    blob.upload_from_string(serialized_graph)
+                    gcs_path = f"gs://{gcs_bucket_name}/{object_name}"
+                    logging.info(f"Uploaded serialized graph to GCS: {gcs_path}")
+
+                    # Modify Pub/Sub message to include GCS path
+                    message_payload = {
+                        "batch_id": batch_id,
+                        "gcs_path": gcs_path
+                    }
+                    future = publisher.publish(topic_path, json.dumps(message_payload).encode("utf-8"))
+                    future.result() # Wait for the publish call to complete
+                    logging.info(f"Published message with GCS path for batch {batch_id} to topic {persistor_topic_name}")
+
+                except Exception as e:
+                    logging.error(f"Error serializing or uploading graph to GCS for batch {batch_id}: {e}", exc_info=True)
+                    spanner_ops.release_lock(batch_id, "FAILED")
+                    return None
+            else:
+                logging.error(f"No community_data to serialize for batch {batch_id}. This is an error condition.")
+                spanner_ops.release_lock(batch_id, "FAILED")
+                return None # Stop execution
 
             spanner_ops.release_lock(batch_id, "COMPLETED")
 
