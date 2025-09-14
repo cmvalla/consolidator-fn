@@ -44,6 +44,7 @@ SUMMARY_PROMPT = PromptTemplate.from_template(
 class LLMOperations:
     def __init__(self, llm):
         self.llm = llm
+        self.summarization_chain = SUMMARY_PROMPT | self.llm
 
     def _get_single_embedding(self, text: str, entity_id: str = "Unknown"):
         """Generates embeddings for a given text by calling the graphrag-embedding service."""
