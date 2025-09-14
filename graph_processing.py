@@ -84,7 +84,7 @@ class GraphProcessor:
 
         clusterable_entities = [e for e in entities if e.get("type") not in ["Chunk", "Community"]]
         entity_ids = [e["id"] for e in clusterable_entities]
-        embeddings = np.array([e.get("clustering_embedding") for e in clusterable_entities])
+        embeddings = np.array([e.get("cluster_embedding") for e in clusterable_entities])
 
         valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None and len(emb) > 0]
         
@@ -431,8 +431,8 @@ class GraphProcessor:
                     "summary": full_community_summary,
                     "community_type": "structural"
                 },
-                "clustering_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
-                "retrieval_document_embedding": semantic_search_embedding, # Use semantic search embedding for the main embedding field
+                "cluster_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
+                "embedding": semantic_search_embedding, # Use semantic search embedding for the main embedding field
                 "communities": []
             }
             entities.append(community_entity)
