@@ -391,38 +391,20 @@ class GraphProcessor:
 
         cliques = g.maximal_cliques()
         
-        community_summaries = {}
-        for entity in entities:
-            entity_id = entity["id"]
-            entity["communities"] = []
-            
-            entity_summary_parts = []
-            if entity.get("type"):
-                entity_summary_parts.append(f"Type: {entity.get('type')}")
-            if entity.get("properties", {}).get("summary"):
-                entity_summary_parts.append(f"Summary: {entity['properties']['summary']}")
-            elif entity.get("properties", {}).get("name"):
-                entity_summary_parts.append(f"Name: {entity['properties']['name']}")
-            
-            entity_text_for_summary = ", ".join(entity_summary_parts) if entity_summary_parts else entity_id
-
-            for i, clique in enumerate(cliques):
-                if id_to_vertex.get(entity_id) is not None and id_to_vertex[entity_id] in clique:
-                    community_id = f"clique_{i}"
-                    entity["communities"].append(community_id)
-                    
-                    if community_id not in community_summaries:
-                        community_summaries[community_id] = []
-                    community_summaries[community_id].append(entity_text_for_summary)
-
+        new_community_entities = []
         for comm_id, entity_texts in community_summaries.items():
-            full_community_summary = " ".join(entity_texts) 
-            
-            if full_community_summary:
-                all_embeddings = self.llm_ops._get_single_embedding(full_community_summary, comm_id)
-                semantic_search_embedding = all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
-            else:
-                semantic_search_embedding = [0.0] * Config.EMBEDDING_DIMENSION
+            full_community_summary = " ".join(entity_texts)
+
+            if not full_community_summary:
+                logging.warning(f"Skipping Community entity creation for {comm_id} due to empty summary.")
+                continue
+
+            all_embeddings = self.llm_ops._get_single_embedding(full_community_summary, comm_id)
+            if not all_embeddings:
+                logging.warning(f"Skipping Community entity creation for {comm_id} due to missing embeddings.")
+                continue
+
+            semantic_search_embedding = all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
             
             community_entity = {
                 "id": comm_id,
@@ -435,9 +417,11 @@ class GraphProcessor:
                 "embedding": semantic_search_embedding, # Use semantic search embedding for the main embedding field
                 "communities": []
             }
-            entities.append(community_entity)
+            new_community_entities.append(community_entity)
 
-        logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(community_summaries)} standard Community entities.")
+        entities.extend(new_community_entities)
+
+        logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(new_community_entities)} standard Community entities.")
         return data
 
     def remove_entities_with_null_keys_and_relationships(self, data):
