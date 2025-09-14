@@ -179,7 +179,14 @@ class GraphProcessor:
                 # Call the LLM with the batched inputs
                 generated_properties_str = self.llm_ops.generate_class_properties(batch_inputs, CLASS_SCHEMA)
                 extracted_json_str = self.llm_ops.extract_json_from_llm_response(generated_properties_str)
-                batch_generated_properties = json.loads(extracted_json_str)
+                
+                try:
+                    batch_generated_properties = json.loads(extracted_json_str)
+                except json.JSONDecodeError as json_e:
+                    logging.error(f"JSONDecodeError: Failed to decode extracted_json_str. Error: {json_e}")
+                    logging.error(f"Problematic generated_properties_str: {generated_properties_str}")
+                    logging.error(f"Problematic extracted_json_str: {extracted_json_str}")
+                    raise # Re-raise to be caught by the outer exception handler
                 
                 if not isinstance(batch_generated_properties, list):
                     logging.error(f"LLM did not return a list of properties for batch starting at index {i}. Response: {extracted_json_str}")
@@ -189,7 +196,8 @@ class GraphProcessor:
 
             except Exception as e:
                 logging.error(f"Failed to process LLM batch starting at index {i}: {e}", exc_info=True)
-                all_generated_properties.extend([{{}} for _ in batch_inputs]) # Fill with empty dicts on error
+                # Ensure all_generated_properties is extended with a list of dictionaries
+                all_generated_properties.extend([{}] * len(batch_inputs)) # Fill with empty dicts on error
 
             processed_clusters += len(batch_inputs)
             if total_clusters > 0 and processed_clusters % (total_clusters // 10 or 1) == 0:

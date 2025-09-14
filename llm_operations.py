@@ -3,6 +3,7 @@ import logging
 import requests
 import time
 import json
+import re
 from typing import List
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
@@ -249,11 +250,22 @@ class LLMOperations:
         Extracts a JSON object from the model's text response and performs basic validation.
         Handles markdown code blocks.
         """
-        # Find the start of the JSON object
-        json_start = text.find('{')
-        # Find the end of the JSON object
-        json_end = text.rfind('}')
-        if json_start != -1 and json_end != -1:
+        # Try to find JSON within markdown code blocks
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            json_str = json_match.group(1)
+            try:
+                # Attempt to parse to validate and then re-serialize to ensure it's clean
+                return json.dumps(json.loads(json_str))
+            except json.JSONDecodeError:
+                logging.warning("Found markdown JSON block, but it was invalid. Attempting fallback extraction.")
+
+        # Fallback to finding the first and last curly braces
+        json_start = text.find('[') # Changed to '[' as the expected output is a JSON array
+        json_end = text.rfind(']') # Changed to ']' as the expected output is a JSON array
+        if json_start != -1 and json_end != -1 and json_end > json_start:
             json_str = text[json_start:json_end+1]
             return json_str
-        return text
+        
+        logging.warning(f"No valid JSON found in LLM response: {text}")
+        return "[]" # Return an empty JSON array as a safe default
