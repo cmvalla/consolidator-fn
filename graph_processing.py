@@ -391,6 +391,30 @@ class GraphProcessor:
 
         cliques = g.maximal_cliques()
         
+        community_summaries = {} # Moved initialization here
+        for entity in entities:
+            entity_id = entity["id"]
+            entity["communities"] = []
+            
+            entity_summary_parts = []
+            if entity.get("type"):
+                entity_summary_parts.append(f"Type: {entity.get('type')}")
+            if entity.get("properties", {}).get("summary"):
+                entity_summary_parts.append(f"Summary: {entity['properties']['summary']}")
+            elif entity.get("properties", {}).get("name"):
+                entity_summary_parts.append(f"Name: {entity['properties']['name']}")
+            
+            entity_text_for_summary = ", ".join(entity_summary_parts) if entity_summary_parts else entity_id
+
+            for i, clique in enumerate(cliques):
+                if id_to_vertex.get(entity_id) is not None and id_to_vertex[entity_id] in clique:
+                    community_id = f"clique_{i}"
+                    entity["communities"].append(community_id)
+                    
+                    if community_id not in community_summaries:
+                        community_summaries[community_id] = []
+                    community_summaries[community_id].append(entity_text_for_summary)
+
         new_community_entities = []
         for comm_id, entity_texts in community_summaries.items():
             full_community_summary = " ".join(entity_texts)
