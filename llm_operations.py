@@ -124,7 +124,7 @@ class LLMOperations:
                 token = token_response.text
                 headers = {"Authorization": f"Bearer {token}"}
                 
-                payload = {"texts": texts, "embedding_source": "gemini"} # Use 'texts' key for batch
+                payload = {"texts": texts, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]} # Use 'texts' key for batch
                 logging.info(f"Sending batch embedding request: url={embedding_service_url}, payload_size={len(texts)}, headers={{'Authorization': 'Bearer ...'}}")
                 response = requests.post(embedding_service_url, json=payload, headers=headers)
                 logging.info(f"Received raw batch embedding response (Status: {response.status_code}): {response.text}")
@@ -213,8 +213,8 @@ class LLMOperations:
                 entity_id_to_index[entity_id] = i
             else:
                 logging.warning(f"Skipping embedding for entity {entity_id} because there is no text to embed.")
-                entities[i]['clustering_embedding'] = [0.0] * Config.EMBEDDING_DIMENSION
-                entities[i]['semantic_search_embedding'] = [0.0] * Config.EMBEDDING_DIMENSION
+                entities[i]['cluster_embedding'] = [0.0] * Config.EMBEDDING_DIMENSION
+                entities[i]['embedding'] = [0.0] * Config.EMBEDDING_DIMENSION
 
         # Batching logic
         batch_size = 50 # Define a suitable batch size
@@ -228,8 +228,8 @@ class LLMOperations:
 
             for j, entity_id in enumerate(batch_entity_ids):
                 original_index = entity_id_to_index[entity_id]
-                entities[original_index]['clustering_embedding'] = batch_embeddings[j]['clustering']
-                entities[original_index]['semantic_search_embedding'] = batch_embeddings[j]['semantic_search']
+                entities[original_index]['cluster_embedding'] = batch_embeddings[j]['clustering']
+                entities[original_index]['embedding'] = batch_embeddings[j]['semantic_search']
 
         return data
 
