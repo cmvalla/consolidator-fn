@@ -443,7 +443,9 @@ class GraphProcessor:
             }
             new_community_entities.append(community_entity)
 
+        logging.info(f"New Community Entities created: {[e['id'] for e in new_community_entities]}")
         entities.extend(new_community_entities)
+        logging.info(f"Entities after extending with new Community Entities: {[e['id'] for e in entities if e.get('type') == 'Community']}")
 
         logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(new_community_entities)} standard Community entities.")
         return data
@@ -452,6 +454,8 @@ class GraphProcessor:
         logging.info("Starting removal of entities with null/empty IDs and their relationships...")
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
+
+        logging.info(f"Entities before removal: {[e['id'] for e in entities if e.get('type') == 'Community']}")
 
         entities_to_remove_ids = set()
         cleaned_entities = []
@@ -466,6 +470,7 @@ class GraphProcessor:
         
         if not entities_to_remove_ids:
             logging.info("No entities with null/empty IDs found. Skipping relationship filtering.")
+            logging.info(f"Entities after removal (no changes): {[e['id'] for e in cleaned_entities if e.get('type') == 'Community']}")
             return data
 
         cleaned_relationships = []
@@ -480,6 +485,7 @@ class GraphProcessor:
         data["entities"] = cleaned_entities
         data["relationships"] = cleaned_relationships
         logging.info(f"Finished removal. {len(entities) - len(cleaned_entities)} entities and {len(relationships) - len(cleaned_relationships)} relationships removed.")
+        logging.info(f"Entities after removal: {[e['id'] for e in cleaned_entities if e.get('type') == 'Community']}")
         return data
 
 def generate_class_eid(name):
