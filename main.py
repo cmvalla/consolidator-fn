@@ -1,3 +1,13 @@
+# This Cloud Function acts as the 'consolidator' in the data processing pipeline.
+# Its primary responsibilities include:
+# 1. Fetching partial graph data (entities and relationships) from Redis.
+# 2. Aggregating this partial data into a comprehensive graph.
+# 3. Generating embeddings for entities using an LLM.
+# 4. Performing entity clustering and deduplication.
+# 5. Running community detection algorithms on the graph.
+# 6. Serializing the processed graph data and uploading it to Google Cloud Storage (GCS).
+# 7. Publishing a Pub/Sub message to trigger the 'persistor' function, passing the GCS path of the processed graph.
+
 import functions_framework
 import logging
 import json
@@ -25,9 +35,13 @@ logging.basicConfig(level=logging.DEBUG)
 
 @functions_framework.cloud_event
 def consolidator(cloud_event):
+    # Initialize batch_id to None. This variable will hold the ID of the current processing batch,
+    # crucial for tracking and managing locks in Spanner.
     batch_id = None
     try:
-        # Initialize clients and operations inside the function
+        # Initialize various clients and operation classes. These are instantiated inside the function
+        # to ensure a fresh state for each Cloud Function invocation and to properly handle
+        # potential connection issues or resource leaks across invocations.
         client_factory = ClientFactory()
         redis_client = client_factory.get_redis_client()
         llm = client_factory.get_llm()
@@ -37,53 +51,87 @@ def consolidator(cloud_event):
         redis_ops = RedisOperations(redis_client)
         llm_ops = LLMOperations(llm)
         graph_processor = GraphProcessor(llm_ops)
+        # SpannerOperations requires instance and database IDs, which are fetched from environment variables.
+        # This promotes flexibility and avoids hardcoding sensitive configuration.
         spanner_ops = SpannerOperations(spanner_client, os.environ.get("SPANNER_INSTANCE_ID"), os.environ.get("SPANNER_DATABASE_ID"))
 
-        # Log system resource usage
+        # Log system resource usage to monitor the function's performance and resource consumption.
+        # This helps in debugging performance bottlenecks and optimizing resource allocation for the Cloud Function.
         cpu_usage = psutil.cpu_percent(interval=1)
         memory_info = psutil.virtual_memory()
         logging.info(f"System CPU Usage: {cpu_usage}%")
         logging.info(f"System Memory: Total={memory_info.total / 1024**3:.2f}GB, Available={memory_info.available / 1024**3:.2f}GB, Used={memory_info.used / 1024**3:.2f}GB, Percentage={memory_info.percent}%")
 
+        # Decode the Pub/Sub message that triggered this Cloud Function.
+        # The message is expected to contain a 'batch_id' which identifies the data batch to be processed.
         data = decode_pubsub_message(cloud_event)
         batch_id = data.get("batch_id")
 
+        # Retrieve the Pub/Sub topic name for the 'persistor' function from environment variables.
+        # This topic is used to send the processed graph data to the next stage of the pipeline.
         persistor_topic_name = os.environ.get("PERSISTOR_TOPIC_NAME")
         if not persistor_topic_name:
             logging.error("PERSISTOR_TOPIC_NAME environment variable not set.")
+            # Release the lock if the batch_id is available, indicating a failure to proceed.
             if batch_id:
                 spanner_ops.release_lock(batch_id, "FAILED")
             return None
         project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
         topic_path = publisher.topic_path(project_id, persistor_topic_name)
 
-        instance_id = os.environ.get("GAE_INSTANCE") # Unique ID for the instance
+        # Get the unique instance ID of the Cloud Run revision. This is used for acquiring
+        # and releasing locks in Spanner to prevent multiple instances from processing the same batch concurrently.
+        instance_id = os.environ.get("GAE_INSTANCE")
 
+        # Attempt to acquire a lock for the current batch in Spanner. This is a critical step
+        # to ensure idempotency and prevent race conditions in a distributed environment.
         if not spanner_ops.acquire_lock(batch_id, instance_id):
-            return None # Another instance is processing this batch
+            # If the lock cannot be acquired, it means another instance is already processing this batch.
+            # In this case, the current invocation should gracefully exit.
+            return None
 
         try:
+            # Fetch partial graph data (entities and relationships) from Redis using the batch_id.
+            # Redis acts as a temporary store for intermediate results from the 'worker' function.
             fetched_data = redis_ops.fetch_from_redis(data)
             if not fetched_data.get("partial_results"):
                 logging.info(f"No data found in Redis for batch {data.get('batch_id')}. Stopping execution.")
+                # Release the lock with a 'FAILED' status as no data was found to process.
                 spanner_ops.release_lock(batch_id, "FAILED")
                 return None
 
+            # --- Graph Processing Pipeline ---
+            # 1. Aggregate results from potentially multiple partial results fetched from Redis.
+            # This step combines all extracted entities and relationships into a single coherent graph structure.
             aggregated_data = graph_processor.aggregate_results(fetched_data)
+            # 2. Generate embeddings for entities. Embeddings are numerical representations
+            # that capture the semantic meaning of entities, crucial for clustering and similarity searches.
             embedded_data = llm_ops.generate_embeddings(aggregated_data)
+            # 3. Cluster and merge similar entities. This step identifies and groups
+            # entities that represent the same real-world concept, creating 'Class' nodes.
             clustered_data = graph_processor.cluster_and_merge_entities(embedded_data)
+            # 4. Deduplicate entities to resolve any remaining duplicate IDs or representations
+            # before community detection, ensuring data integrity.
             deduplicated_data = graph_processor.deduplicate_entities(clustered_data)
+            # 5. Run community detection algorithms (e.g., maximal cliques) on the graph.
+            # This identifies densely connected groups of entities, forming 'Community' nodes.
             community_data = graph_processor.run_igraph_community_detection(deduplicated_data)
+            # 6. Remove any entities or relationships that might have null or empty IDs,
+            # ensuring the final graph structure is valid before persistence.
             new_community_data = graph_processor.remove_entities_with_null_keys_and_relationships(community_data)
             
-            # Save processed data to Redis (REMOVED)
-            # redis_ops.save_processed_data(batch_id, community_data)
+            # The original code had a commented-out section for saving processed data to Redis.
+            # This indicates a design decision to directly pass data to the persistor via GCS/PubSub
+            # rather than using Redis as an intermediate store for processed graph data.
 
-            # Serialize igraph object and upload to GCS
+            # Serialize the processed igraph object and upload it to Google Cloud Storage (GCS).
+            # GCS is used for durable storage of the large graph object, as Pub/Sub messages have size limits.
             if new_community_data:
                 try:
+                    # Use pickle for serialization of the Python object (igraph graph).
                     serialized_graph = pickle.dumps(new_community_data)
                     
+                    # Get the GCS bucket name from environment variables.
                     gcs_bucket_name = os.environ.get("GRAPH_DATA_BUCKET_NAME")
                     if not gcs_bucket_name:
                         logging.error("GRAPH_DATA_BUCKET_NAME environment variable not set.")
@@ -93,22 +141,26 @@ def consolidator(cloud_event):
                     storage_client = storage.Client()
                     bucket = storage_client.bucket(gcs_bucket_name)
                     
-                    # Generate a unique object name
+                    # Generate a unique object name for the GCS blob using the batch_id and a timestamp.
+                    # This ensures that each processed graph is stored uniquely and can be easily retrieved.
                     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
                     object_name = f"graph_data/{batch_id.replace('/', '_').replace(':', '_')}_{timestamp}.pkl"
                     blob = bucket.blob(object_name)
                     
+                    # Upload the serialized graph data to GCS.
                     blob.upload_from_string(serialized_graph)
                     gcs_path = f"gs://{gcs_bucket_name}/{object_name}"
                     logging.info(f"Uploaded serialized graph to GCS: {gcs_path}")
 
-                    # Modify Pub/Sub message to include GCS path
+                    # Publish a Pub/Sub message to the 'persistor' topic.
+                    # The message payload includes the batch_id and the GCS path to the serialized graph.
+                    # This triggers the 'persistor' function to retrieve and store the graph data in Spanner.
                     message_payload = {
                         "batch_id": batch_id,
                         "gcs_path": gcs_path
                     }
                     future = publisher.publish(topic_path, json.dumps(message_payload).encode("utf-8"))
-                    future.result() # Wait for the publish call to complete
+                    future.result() # Wait for the publish call to complete to ensure message delivery.
                     logging.info(f"Published message with GCS path for batch {batch_id} to topic {persistor_topic_name}")
 
                 except Exception as e:
@@ -116,17 +168,26 @@ def consolidator(cloud_event):
                     spanner_ops.release_lock(batch_id, "FAILED")
                     return None
             else:
+                # This condition indicates a critical error: no graph data was generated after processing.
                 logging.error(f"No community_data to serialize for batch {batch_id}. This is an error condition.")
                 spanner_ops.release_lock(batch_id, "FAILED")
                 return None # Stop execution
 
+            # Release the lock for the current batch in Spanner, marking it as 'COMPLETED'.
+            # This signals that the batch has been successfully processed by the consolidator.
             spanner_ops.release_lock(batch_id, "COMPLETED")
 
         except Exception as e:
+            # Catch any exceptions that occur during the main processing logic.
             logging.error(f'An error occurred while processing batch {batch_id}: {e}', exc_info=True)
+            # Release the lock with a 'FAILED' status, indicating an issue during processing.
             spanner_ops.release_lock(batch_id, "FAILED")
-            raise e # Re-raise the exception to trigger a retry if configured
+            # Re-raise the exception to allow Cloud Functions to handle retries if configured.
+            raise e
     except Exception as e:
+        # Catch any exceptions that occur outside the main processing try-except block,
+        # typically during initial setup or lock acquisition.
+        # Attempt to get batch_id if it wasn't set earlier.
         batch_id = batch_id or (data and data.get("batch_id"))
         logging.error(f'An error occurred in the consolidator for batch_id {batch_id}: {e}', exc_info=True)
         
