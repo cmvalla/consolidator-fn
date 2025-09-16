@@ -37,6 +37,8 @@ logging.basicConfig(level=logging.DEBUG)
 def consolidator(cloud_event):
     # Initialize batch_id to None. This variable will hold the ID of the current processing batch,
     # crucial for tracking and managing locks in Spanner.
+    logging.info(f"--- START OF CONSOLIDATOR INVOCATION ---")
+    logging.info(f"GRAPH_DATA_BUCKET_NAME from env: {os.environ.get('GRAPH_DATA_BUCKET_NAME')}")
     batch_id = None
     try:
         # Initialize various clients and operation classes. These are instantiated inside the function
