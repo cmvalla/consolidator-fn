@@ -22,6 +22,7 @@ class GraphProcessor:
     """
     def __init__(self, llm_operations):
         self.llm_ops = llm_operations
+        self.summarization_chain = LLMChain(llm=self.llm_ops.llm, prompt=SUMMARY_PROMPT)
 
     def aggregate_results(self, data):
         """
@@ -466,7 +467,8 @@ class GraphProcessor:
         # Assign entity properties to igraph vertex attributes.
         g.vs["id"] = [entity["id"] for entity in entities]
         g.vs["type"] = [entity["type"] for entity in entities]
-        g.vs["properties"] = [entity.get("properties", {}) for entity in entities]
+        g.vs["properties"] = [entity.get("properties", {})
+ for entity in entities]
         g.vs["embedding"] = [entity.get("clustering_embedding") for entity in entities]
 
         # Add edges to the igraph graph based on the relationships.
@@ -511,7 +513,10 @@ class GraphProcessor:
         new_community_entities = []
         # Create new 'Community' entities based on the detected communities.
         for comm_id, entity_texts in community_summaries.items():
-            full_community_summary = " ".join(entity_texts)
+            entities_description = " ".join(entity_texts)
+
+            # Generate summary using LLM
+            full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description}).content
 
             if not full_community_summary:
                 logging.warning(f"Skipping Community entity creation for {comm_id} due to empty summary.")
@@ -528,8 +533,8 @@ class GraphProcessor:
             community_entity = {
                 "id": comm_id,
                 "type": "Community",
+                "Summary": full_community_summary,
                 "properties": {
-                    "summary": full_community_summary,
                     "community_type": "structural"
                 },
                 "cluster_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
