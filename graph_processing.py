@@ -15,10 +15,28 @@ from llm_operations import CLASS_PROPERTY_GENERATION_PROMPT, SUMMARY_PROMPT, CLA
 import hashlib
 
 class GraphProcessor:
+    """
+    The GraphProcessor class is responsible for various graph-related operations within the consolidator function.
+    This includes aggregating partial results, clustering and merging entities, deduplicating entities,
+    and performing community detection.
+    """
     def __init__(self, llm_operations):
         self.llm_ops = llm_operations
 
     def aggregate_results(self, data):
+        """
+        Aggregates partial graph data (entities and relationships) received from Redis.
+        This function combines all extracted entities and relationships from multiple
+        partial results into a single, unified set.
+
+        Args:
+            data (dict): A dictionary containing 'partial_results', where each result
+                         is a JSON string representing extracted graph data.
+
+        Returns:
+            dict: A dictionary containing the aggregated 'entities' and 'relationships',
+                  along with the original 'batch_id'.
+        """
         all_entities = {}
         all_relationships = []
         for res_str in data["partial_results"]:
@@ -34,11 +52,15 @@ class GraphProcessor:
 
             for entity in extracted_entities:
                 entity_id = entity.get("id")
+                # Ensure entities have a valid ID before adding them to the aggregated set.
+                # This prevents issues with entities that might be malformed or incomplete.
                 if entity_id:
                     all_entities[entity_id] = entity
                 else:
                     logging.warning(f"Skipping entity without id: {entity}")
-            # Process relationships to ensure 'source' and 'target' keys are present
+            # Process relationships to ensure 'source' and 'target' keys are present.
+            # The LLM might return 'id_1' and 'id_2', which are renamed to 'source' and 'target'
+            # for consistency with graph processing conventions.
             for rel in extracted_relationships:
                 if "id_1" in rel and "id_2" in rel:
                     rel["source"] = rel.pop("id_1") # Rename id_1 to source
@@ -59,8 +81,16 @@ class GraphProcessor:
 
     def cluster_and_merge_entities(self, data, similarity_threshold=0.9):
         """
-        Clusters similar entities, creates Class nodes with name-based IDs, and merges
-        classes with the same name by re-linking their instances.
+        Clusters similar entities based on their embeddings, creates 'Class' nodes for these clusters,
+        and merges classes with the same name by re-linking their instances.
+        This process aims to reduce redundancy and create a more abstract representation of entities.
+
+        Args:
+            data (dict): A dictionary containing 'entities' (with 'cluster_embedding') and 'relationships'.
+            similarity_threshold (float): The cosine similarity threshold for grouping entities into clusters.
+
+        Returns:
+            dict: The updated data dictionary with new 'Class' entities and 'INSTANCE_OF' relationships.
         """
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
@@ -70,6 +100,7 @@ class GraphProcessor:
 
         id_to_entity = {entity['id']: entity for entity in entities}
 
+        # Map entity IDs to their source text (from chunks) for LLM context during class property generation.
         entity_id_to_source_text = {}
         for rel in relationships:
             if rel.get("type") == "ARE_PART_OF_CHUNK":
@@ -82,10 +113,12 @@ class GraphProcessor:
                         if original_text:
                             entity_id_to_source_text[entity_id] = original_text
 
+        # Filter out 'Chunk' and 'Community' entities as they are not subject to clustering in this step.
         clusterable_entities = [e for e in entities if e.get("type") not in ["Chunk", "Community"]]
         entity_ids = [e["id"] for e in clusterable_entities]
         embeddings = np.array([e.get("cluster_embedding") for e in clusterable_entities])
 
+        # Identify valid embeddings (non-None and non-empty) for clustering.
         valid_indices = [i for i, emb in enumerate(embeddings) if emb is not None and len(emb) > 0]
         
         total_entities = len(clusterable_entities)
@@ -112,8 +145,11 @@ class GraphProcessor:
         valid_embeddings = embeddings[valid_indices]
         valid_entity_ids = [entity_ids[i] for i in valid_indices]
         
+        # Calculate cosine similarity between entity embeddings to identify similar entities.
         similarity_matrix = cosine_similarity(valid_embeddings)
 
+        # Perform a simple greedy clustering based on the similarity matrix.
+        # Entities are grouped into clusters if their similarity exceeds the threshold.
         visited = [False] * len(valid_entity_ids)
         clusters = []
         for i in range(len(valid_entity_ids)):
@@ -127,6 +163,7 @@ class GraphProcessor:
                     visited[j] = True
             clusters.append(cluster)
 
+        # Initialize LLM chains for generating class properties and summaries.
         class_property_chain = LLMChain(llm=self.llm_ops.llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
         summarization_chain = LLMChain(llm=self.llm_ops.llm, prompt=SUMMARY_PROMPT)
 
@@ -136,6 +173,8 @@ class GraphProcessor:
         batched_llm_inputs = []
         cluster_info_list = [] # To store info for mapping results back to original clusters
 
+        # Prepare batched inputs for LLM calls to generate class properties.
+        # This optimizes LLM usage by sending multiple requests in a single batch.
         for cluster_member_ids in clusters:
             instances_text_parts = []
             source_text_parts = set()
@@ -171,12 +210,13 @@ class GraphProcessor:
         total_clusters = len(clusters)
         all_generated_properties = []
 
+        # Process clusters in batches to generate class properties using the LLM.
         for i in range(0, total_clusters, Config.LLM_BATCH_SIZE):
             batch_inputs = batched_llm_inputs[i:i + Config.LLM_BATCH_SIZE]
             batch_cluster_info = cluster_info_list[i:i + Config.LLM_BATCH_SIZE]
 
             try:
-                # Call the LLM with the batched inputs
+                # Call the LLM with the batched inputs to generate properties for the classes.
                 generated_properties_str = self.llm_ops.generate_class_properties(batch_inputs, CLASS_SCHEMA)
                 extracted_json_str = self.llm_ops.extract_json_from_llm_response(generated_properties_str)
                 
@@ -196,14 +236,15 @@ class GraphProcessor:
 
             except Exception as e:
                 logging.error(f"Failed to process LLM batch starting at index {i}: {e}", exc_info=True)
-                # Ensure all_generated_properties is extended with a list of dictionaries
-                all_generated_properties.extend([{}] * len(batch_inputs)) # Fill with empty dicts on error
+                # On error, extend with empty dictionaries to maintain list length and prevent index errors
+                all_generated_properties.extend([{}] * len(batch_inputs))
 
             processed_clusters += len(batch_inputs)
             if total_clusters > 0 and processed_clusters % (total_clusters // 10 or 1) == 0:
                 progress = (processed_clusters / total_clusters) * 100
                 logging.info(f"Class property generation progress: {progress:.0f}% ({processed_clusters}/{total_clusters})")
 
+        # Iterate through the generated properties and create or merge 'Class' entities.
         for idx, generated_properties in enumerate(all_generated_properties):
             cluster_info = cluster_info_list[idx]
             cluster_member_ids = cluster_info["member_ids"]
@@ -213,19 +254,25 @@ class GraphProcessor:
                 if not class_name or not class_name.strip():
                     logging.warning(f"Skipping class creation for cluster due to empty class name. Cluster info: {cluster_info}")
                     continue
+                # Generate a consistent and unique EID for the class based on its name.
                 class_eid = generate_class_eid(class_name)
 
                 if not class_eid:
                     logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
                     continue
 
+                # If a class with the same name already exists, merge the current cluster's members
+                # into the existing class by re-linking their instances.
                 if class_name in name_to_class_entity:
                     existing_class_eid = name_to_class_entity[class_name]["id"]
                     for member_id in cluster_member_ids:
                         class_id_map[member_id] = existing_class_eid
                     logging.info(f"Merged cluster into existing class '{class_name}' (ID: {existing_class_eid})")
                 else:
+                    # If it's a new class, create a new 'Class' entity.
+                    # Generate a summary for the class using an LLM.
                     summary = self.llm_ops.summarization_chain.invoke({"text_chunk": cluster_info["cluster_text"]}).content
+                    # Generate embeddings for the new class entity.
                     all_embeddings = self.llm_ops._get_single_embedding(summary, class_eid)
                     class_entity = {
                         "id": class_eid,
@@ -246,11 +293,14 @@ class GraphProcessor:
         new_entities = list(name_to_class_entity.values())
         new_relationships = []
 
+        # Update existing entities: change their type to 'Instance' if they are not 'Chunk' or 'Community'.
+        # This reflects their new role as instances of the newly created 'Class' entities.
         for entity in entities:
             if entity.get("type") not in ["Chunk", "Community"]:
                 entity["type"] = "Instance"
             new_entities.append(entity)
             
+            # Create 'INSTANCE_OF' relationships linking instances to their respective classes.
             class_id = class_id_map.get(entity["id"])
             if class_id:
                 new_relationships.append({
@@ -260,9 +310,11 @@ class GraphProcessor:
                     "properties": {"description": "Indicates that an entity is an instance of a specific class."}
                 })
 
+        # Propagate relationships from instances to their corresponding classes.
+        # This creates higher-level relationships between classes based on the relationships between their instances.
         for rel in relationships:
             source_class_id = class_id_map.get(rel.get("source"))
-            target_class_id = class_id_map.get(rel.get("target"))
+            target_class_id = class_id_map.get(rel.get("target")),
             if source_class_id and target_class_id and source_class_id != target_class_id:
                 new_relationships.append({
                     "source": source_class_id,
@@ -278,12 +330,27 @@ class GraphProcessor:
         return data
 
     def deduplicate_entities(self, data):
-        """Finds and resolves duplicate Eids before community detection."""
+        """
+        Finds and resolves duplicate Entity IDs (EIDs) before community detection.
+        This function handles two main cases for duplicates:
+        1. Duplicate 'Class' entities: Merges them by selecting a winner based on instance count
+           and remapping relationships to the winning class.
+        2. Duplicate 'Instance' or unhandled type entities: Renames duplicates by appending a unique suffix
+           to their EIDs and updates related relationships.
+        This ensures that each entity has a unique identifier, which is crucial for graph integrity.
+
+        Args:
+            data (dict): A dictionary containing 'entities' and 'relationships'.
+
+        Returns:
+            dict: The updated data dictionary with duplicate entities resolved and relationships remapped.
+        """
         logging.info("Starting entity de-duplication process...")
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
         id_to_entity = {e["id"]: e for e in entities}
 
+        # Group entities by their EID to identify duplicates.
         eid_groups = {}
         for entity in entities:
             eid = entity["id"]
@@ -301,6 +368,8 @@ class GraphProcessor:
 
             logging.warning(f"Found duplicate EID: '{eid}' for {len(group)} entities.")
 
+            # Handle duplicate 'Class' entities.
+            # The class with the most instances is chosen as the winner, and others are merged into it.
             if all(e.get("type") == "Class" for e in group):
                 logging.info(f"Handling duplicate Class EID: {eid}")
                 instance_counts = {e["id"]: 0 for e in group}
@@ -317,6 +386,7 @@ class GraphProcessor:
                     eids_to_remap[loser["id"]] = winner["id"]
                     logging.info(f"Merging class '{loser['id']}' into '{winner['id']}'.")
 
+            # Handle duplicate 'Instance' entities by renaming them with a unique suffix.
             elif all(e.get("type") == "Instance" for e in group):
                 logging.info(f"Handling duplicate Instance EID: {eid}")
                 final_entities[eid] = group[0]
@@ -331,6 +401,7 @@ class GraphProcessor:
                     duplicate["id"] = new_eid
                     final_entities[new_eid] = duplicate
                     logging.info(f"Renamed duplicate instance '{original_id}' to '{new_eid}'.")
+            # Handle other unhandled duplicate EID cases by renaming them.
             else:
                 logging.warning(f"Unhandled duplicate EID case for eid '{eid}'. Renaming duplicates.")
                 if group:
@@ -349,6 +420,7 @@ class GraphProcessor:
                         final_entities[new_eid] = duplicate
                         logging.info(f"Renamed duplicate entity '{original_id}' of type '{duplicate.get('type')}' to '{new_eid}'.")
 
+        # Remap relationships to reflect the changes in EIDs due to deduplication.
         for rel in relationships:
             # Ensure rel is a dictionary and has 'source' and 'target' keys before processing
             if isinstance(rel, dict) and "source" in rel and "target" in rel:
@@ -368,19 +440,36 @@ class GraphProcessor:
         return data
 
     def run_igraph_community_detection(self, data):
+        """
+        Performs community detection on the graph using igraph's maximal cliques algorithm.
+        It identifies densely connected groups of entities (cliques) and creates new 'Community'
+        entities for each detected community. Entities are then associated with their respective
+        communities.
+
+        Args:
+            data (dict): A dictionary containing 'entities' and 'relationships'.
+
+        Returns:
+            dict: The updated data dictionary with new 'Community' entities added and
+                  original entities updated with their community affiliations.
+        """
         logging.info("Running igraph community detection...")
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
 
+        # Create a mapping from entity ID to igraph vertex index.
         id_to_vertex = {entity["id"]: i for i, entity in enumerate(entities)}
         
+        # Initialize an igraph graph and add vertices based on the entities.
         g = ig.Graph(directed=False)
         g.add_vertices(len(entities))
+        # Assign entity properties to igraph vertex attributes.
         g.vs["id"] = [entity["id"] for entity in entities]
         g.vs["type"] = [entity["type"] for entity in entities]
         g.vs["properties"] = [entity.get("properties", {}) for entity in entities]
         g.vs["embedding"] = [entity.get("clustering_embedding") for entity in entities]
 
+        # Add edges to the igraph graph based on the relationships.
         edges = []
         for rel in relationships:
             source_id = rel.get("source")
@@ -389,13 +478,15 @@ class GraphProcessor:
                 edges.append((id_to_vertex[source_id], id_to_vertex[target_id]))
         g.add_edges(edges)
 
+        # Find maximal cliques, which represent the communities.
         cliques = g.maximal_cliques()
         
-        community_summaries = {} # Moved initialization here
+        community_summaries = {} # Initialize a dictionary to store summaries for each community.
         for entity in entities:
             entity_id = entity["id"]
-            entity["communities"] = []
+            entity["communities"] = [] # Initialize an empty list to store community IDs for each entity.
             
+            # Prepare a summary for the entity to be used in community summaries.
             entity_summary_parts = []
             if entity.get("type"):
                 entity_summary_parts.append(f"Type: {entity.get('type')}")
@@ -406,16 +497,19 @@ class GraphProcessor:
             
             entity_text_for_summary = ", ".join(entity_summary_parts) if entity_summary_parts else entity_id
 
+            # Assign entities to communities (cliques) they belong to.
             for i, clique in enumerate(cliques):
                 if id_to_vertex.get(entity_id) is not None and id_to_vertex[entity_id] in clique:
-                    community_id = f"clique_{i}"
-                    entity["communities"].append(community_id)
+                    community_id = f"clique_{i}" # Generate a unique ID for the community.
+                    entity["communities"].append(community_id) # Associate the entity with this community.
                     
+                    # Aggregate entity summaries for each community.
                     if community_id not in community_summaries:
                         community_summaries[community_id] = []
                     community_summaries[community_id].append(entity_text_for_summary)
 
         new_community_entities = []
+        # Create new 'Community' entities based on the detected communities.
         for comm_id, entity_texts in community_summaries.items():
             full_community_summary = " ".join(entity_texts)
 
@@ -423,6 +517,7 @@ class GraphProcessor:
                 logging.warning(f"Skipping Community entity creation for {comm_id} due to empty summary.")
                 continue
 
+            # Generate embeddings for the new community entity.
             all_embeddings = self.llm_ops._get_single_embedding(full_community_summary, comm_id)
             if not all_embeddings:
                 logging.warning(f"Skipping Community entity creation for {comm_id} due to missing embeddings.")
@@ -439,10 +534,11 @@ class GraphProcessor:
                 },
                 "cluster_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
                 "embedding": semantic_search_embedding, # Use semantic search embedding for the main embedding field
-                "communities": []
+                "communities": [] # Communities of a community entity are not relevant in this context.
             }
             new_community_entities.append(community_entity)
 
+        # Extend the main entities list with the newly created 'Community' entities.
         logging.info(f"New Community Entities created: {[e['id'] for e in new_community_entities]}")
         entities.extend(new_community_entities)
         logging.info(f"Entities after extending with new Community Entities: {[e['id'] for e in entities if e.get('type') == 'Community']}")
@@ -451,6 +547,16 @@ class GraphProcessor:
         return data
 
     def remove_entities_with_null_keys_and_relationships(self, data):
+        """
+        Removes entities that have null or empty IDs and any relationships connected to them.
+        This is a data cleaning step to ensure graph integrity before persistence.
+
+        Args:
+            data (dict): A dictionary containing 'entities' and 'relationships'.
+
+        Returns:
+            dict: The updated data dictionary with invalid entities and their relationships removed.
+        """
         logging.info("Starting removal of entities with null/empty IDs and their relationships...")
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
@@ -460,6 +566,7 @@ class GraphProcessor:
         entities_to_remove_ids = set()
         cleaned_entities = []
 
+        # Identify entities with null or empty IDs.
         for entity in entities:
             entity_id = entity.get("id")
             if entity_id is None or str(entity_id).strip() == "":
@@ -473,6 +580,7 @@ class GraphProcessor:
             logging.info(f"Entities after removal (no changes): {[e['id'] for e in cleaned_entities if e.get('type') == 'Community']}")
             return data
 
+        # Remove relationships connected to the identified invalid entities.
         cleaned_relationships = []
         for rel in relationships:
             source_id = rel.get("source")
@@ -489,7 +597,16 @@ class GraphProcessor:
         return data
 
 def generate_class_eid(name):
-    """Creates a consistent and unique ID from a string using SHA256 hash."""
+    """
+    Generates a consistent and unique Entity ID (EID) for a class based on its name.
+    This ensures that classes with the same name always have the same EID, facilitating merging.
+
+    Args:
+        name (str): The name of the class.
+
+    Returns:
+        str: A SHA256 hash of the class name, serving as its EID, or None if the name is empty.
+    """
     if not name:
         return None
     # Use SHA256 hash to create a consistent and unique ID
