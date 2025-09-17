@@ -458,18 +458,19 @@ class GraphProcessor:
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
 
-        # Create a mapping from entity ID to igraph vertex index.
-        id_to_vertex = {entity["id"]: i for i, entity in enumerate(entities)}
+        # Create a mapping from entity ID to igraph vertex index, ensuring entities have IDs.
+        valid_entities = [e for e in entities if e.get("id") is not None]
+        id_to_vertex = {entity["id"]: i for i, entity in enumerate(valid_entities)}
         
-        # Initialize an igraph graph and add vertices based on the entities.
+        # Initialize an igraph graph and add vertices based on the valid entities.
         g = ig.Graph(directed=False)
-        g.add_vertices(len(entities))
+        g.add_vertices(len(valid_entities))
+        
         # Assign entity properties to igraph vertex attributes.
-        g.vs["id"] = [entity["id"] for entity in entities]
-        g.vs["type"] = [entity["type"] for entity in entities]
-        g.vs["properties"] = [entity.get("properties", {})
- for entity in entities]
-        g.vs["embedding"] = [entity.get("clustering_embedding") for entity in entities]
+        g.vs["id"] = [entity["id"] for entity in valid_entities]
+        g.vs["type"] = [entity.get("type") for entity in valid_entities]
+        g.vs["properties"] = [entity.get("properties", {}) for entity in valid_entities]
+        g.vs["embedding"] = [entity.get("clustering_embedding") for entity in valid_entities]
 
         # Add edges to the igraph graph based on the relationships.
         edges = []
@@ -485,7 +486,10 @@ class GraphProcessor:
         
         community_summaries = {} # Initialize a dictionary to store summaries for each community.
         for entity in entities:
-            entity_id = entity["id"]
+            entity_id = entity.get("id")
+            if not entity_id:
+                logging.warning(f"Skipping entity in community detection due to missing id: {entity}")
+                continue
             entity["communities"] = [] # Initialize an empty list to store community IDs for each entity.
             
             # Prepare a summary for the entity to be used in community summaries.
@@ -518,7 +522,7 @@ class GraphProcessor:
             entities_description = " ".join(entity_texts)
 
             # Generate summary using LLM
-            full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description}).content
+                        full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description})['text']
 
             if not full_community_summary:
                 logging.warning(f"Skipping Community entity creation for {comm_id} due to empty summary.")
