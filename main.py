@@ -177,7 +177,7 @@ def consolidator(cloud_event):
 
             # Release the lock for the current batch in Spanner, marking it as 'COMPLETED'.
             # This signals that the batch has been successfully processed by the consolidator.
-            spanner_ops.release_lock(batch_id, "COMPLETED")
+            spanner_ops.release_lock(batch_id, "PENDING_PERSISTENCE")
 
         except Exception as e:
             # Catch any exceptions that occur during the main processing logic.
