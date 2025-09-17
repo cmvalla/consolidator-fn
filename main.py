@@ -35,27 +35,38 @@ logging.basicConfig(level=logging.DEBUG)
 
 @functions_framework.cloud_event
 def consolidator(cloud_event):
+    logging.info("Consolidator function started.")
     # Initialize batch_id to None. This variable will hold the ID of the current processing batch,
     # crucial for tracking and managing locks in Spanner.
     logging.info(f"--- START OF CONSOLIDATOR INVOCATION ---")
     logging.info(f"GRAPH_DATA_BUCKET_NAME from env: {os.environ.get('GRAPH_DATA_BUCKET_NAME')}")
     batch_id = None
     try:
+        logging.info("Initializing clients...")
         # Initialize various clients and operation classes. These are instantiated inside the function
         # to ensure a fresh state for each Cloud Function invocation and to properly handle
         # potential connection issues or resource leaks across invocations.
         client_factory = ClientFactory()
+        logging.info("ClientFactory initialized.")
         redis_client = client_factory.get_redis_client()
+        logging.info("Redis client initialized.")
         llm = client_factory.get_llm()
+        logging.info("LLM client initialized.")
         publisher = pubsub_v1.PublisherClient()
+        logging.info("Pub/Sub client initialized.")
         spanner_client = client_factory.get_spanner_client()
+        logging.info("Spanner client initialized.")
 
         redis_ops = RedisOperations(redis_client)
+        logging.info("RedisOperations initialized.")
         llm_ops = LLMOperations(llm)
+        logging.info("LLMOperations initialized.")
         graph_processor = GraphProcessor(llm_ops)
+        logging.info("GraphProcessor initialized.")
         # SpannerOperations requires instance and database IDs, which are fetched from environment variables.
         # This promotes flexibility and avoids hardcoding sensitive configuration.
         spanner_ops = SpannerOperations(spanner_client, os.environ.get("SPANNER_INSTANCE_ID"), os.environ.get("SPANNER_DATABASE_ID"))
+        logging.info("SpannerOperations initialized.")
 
         # Log system resource usage to monitor the function's performance and resource consumption.
         # This helps in debugging performance bottlenecks and optimizing resource allocation for the Cloud Function.
