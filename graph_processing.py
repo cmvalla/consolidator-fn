@@ -24,80 +24,41 @@ class GraphProcessor:
         self.llm_ops = llm_operations
         self.summarization_chain = LLMChain(llm=self.llm_ops.llm, prompt=SUMMARY_PROMPT)
 
-    def aggregate_results(self, data):
-        """
-        Aggregates partial graph data (entities and relationships) received from Redis.
-        This function combines all extracted entities and relationships from multiple
-        partial results into a single, unified set.
-
-        Args:
-            data (dict): A dictionary containing 'partial_results', where each result
-                         is a JSON string representing extracted graph data.
-
-        Returns:
-            dict: A dictionary containing the aggregated 'entities' and 'relationships',
-                  along with the original 'batch_id'.
-        """
-        all_entities = {}
-        all_relationships = []
-        for res_str in data["partial_results"]:
-            logging.debug(f"Processing res_str: {res_str}")
-            res_json = json.loads(res_str)
-            logging.debug(f"Decoded res_json: {res_json}")
-            
-            extracted_entities = res_json.get("extracted_graph_data", {}).get("entities", [])
-            extracted_relationships = res_json.get("extracted_graph_data", {}).get("relationships", [])
-            
-            logging.debug(f"Extracted entities from res_json: {extracted_entities}")
-            logging.debug(f"Extracted relationships from res_json: {extracted_relationships}")
-
-            for entity in extracted_entities:
-                entity_id = entity.get("id")
-                # Ensure entities have a valid ID before adding them to the aggregated set.
-                # This prevents issues with entities that might be malformed or incomplete.
-                if entity_id:
-                    all_entities[entity_id] = entity
-                else:
-                    logging.warning(f"Skipping entity without id: {entity}")
-            # Process relationships to ensure 'source' and 'target' keys are present.
-            # The LLM might return 'id_1' and 'id_2', which are renamed to 'source' and 'target'
-            # for consistency with graph processing conventions.
-            for rel in extracted_relationships:
-                if "id_1" in rel and "id_2" in rel:
-                    rel["source"] = rel.pop("id_1") # Rename id_1 to source
-                    rel["target"] = rel.pop("id_2") # Rename id_2 to target
-                    all_relationships.append(rel)
-                elif "source" in rel and "target" in rel:
-                    all_relationships.append(rel)
-                else:
-                    logging.warning(f"Skipping malformed relationship from LLM: {rel}. Missing 'id_1'/'id_2' or 'source'/'target'.")
-        
-        logging.info(f"Aggregated {len(all_entities)} entities and {len(all_relationships)} relationships.")
-
-        return {
-            "batch_id": data["batch_id"],
-            "entities": list(all_entities.values()),
-            "relationships": all_relationships
-        }
-
-    def cluster_and_merge_entities(self, data, similarity_threshold=0.9):
+    def cluster_and_merge_entities(self, graph: ig.Graph, similarity_threshold=0.9):
         """
         Clusters similar entities based on their embeddings, creates 'Class' nodes for these clusters,
         and merges classes with the same name by re-linking their instances.
         This process aims to reduce redundancy and create a more abstract representation of entities.
 
         Args:
-            data (dict): A dictionary containing 'entities' (with 'cluster_embedding') and 'relationships'.
+            graph (igraph.Graph): The input graph containing entities and relationships.
             similarity_threshold (float): The cosine similarity threshold for grouping entities into clusters.
 
         Returns:
-            dict: The updated data dictionary with new 'Class' entities and 'INSTANCE_OF' relationships.
+            igraph.Graph: The updated graph with new 'Class' entities and 'INSTANCE_OF' relationships.
         """
-        entities = data.get("entities", [])
-        relationships = data.get("relationships", [])
+        if not graph.vcount():
+            return graph
 
-        if not entities:
-            return data
+        # Extract entities and relationships from the graph
+        entities = []
+        for v in graph.vs:
+            entity = {"id": v["name"], "type": v.get("type"), "properties": v.attributes()}
+            # Remove igraph internal attributes
+            entity["properties"].pop("name", None)
+            entity["properties"].pop("type", None)
+            entities.append(entity)
+
+        relationships = []
+        for e in graph.es:
+            rel = {
+                "source": graph.vs[e.source]["name"],
+                "target": graph.vs[e.target]["name"],
+                "type": e.get("type"),
+                "properties": e.attributes()
+            }
+            rel["properties"].pop("type", None)
+            relationships.append(rel)
 
         id_to_entity = {entity['id']: entity for entity in entities}
 
@@ -141,7 +102,7 @@ class GraphProcessor:
 
         if len(valid_indices) < 2:
             logging.warning("Not enough entities with embeddings to perform clustering.")
-            return data
+            return graph
             
         valid_embeddings = embeddings[valid_indices]
         valid_entity_ids = [entity_ids[i] for i in valid_indices]
@@ -291,44 +252,60 @@ class GraphProcessor:
                 logging.error(f"Failed to process generated properties for cluster {cluster_info}: {e}", exc_info=True)
 
 
-        new_entities = list(name_to_class_entity.values())
-        new_relationships = []
+        new_graph = ig.Graph(directed=True) # Create a new graph to build the result
+        new_graph.add_vertices(len(new_entities))
+        new_graph.vs["name"] = [e["id"] for e in new_entities]
+        new_graph.vs["type"] = [e["type"] for e in new_entities]
+        for i, entity in enumerate(new_entities):
+            for k, v in entity["properties"].items():
+                new_graph.vs[i][k] = v
+            if "clustering_embedding" in entity:
+                new_graph.vs[i]["clustering_embedding"] = entity["clustering_embedding"]
+            if "retrieval_document_embedding" in entity:
+                new_graph.vs[i]["retrieval_document_embedding"] = entity["retrieval_document_embedding"]
+
+        # Add relationships to the new graph
+        for rel in relationships:
+            source_vertex = new_graph.vs.find(name=rel["source"])
+            target_vertex = new_graph.vs.find(name=rel["target"])
+            if source_vertex and target_vertex:
+                edge = new_graph.add_edge(source_vertex, target_vertex)
+                edge["type"] = rel["type"]
+                for k, v in rel["properties"].items():
+                    edge[k] = v
 
         # Update existing entities: change their type to 'Instance' if they are not 'Chunk' or 'Community'.
         # This reflects their new role as instances of the newly created 'Class' entities.
-        for entity in entities:
-            if entity.get("type") not in ["Chunk", "Community"]:
-                entity["type"] = "Instance"
-            new_entities.append(entity)
+        for v in new_graph.vs:
+            if v["type"] not in ["Chunk", "Community"]:
+                v["type"] = "Instance"
             
             # Create 'INSTANCE_OF' relationships linking instances to their respective classes.
-            class_id = class_id_map.get(entity["id"])
+            class_id = class_id_map.get(v["name"])
             if class_id:
-                new_relationships.append({
-                    "source": entity["id"],
-                    "target": class_id,
-                    "type": "INSTANCE_OF",
-                    "properties": {"description": "Indicates that an entity is an instance of a specific class."}
-                })
+                source_vertex = new_graph.vs.find(name=v["name"])
+                target_vertex = new_graph.vs.find(name=class_id)
+                if source_vertex and target_vertex:
+                    edge = new_graph.add_edge(source_vertex, target_vertex)
+                    edge["type"] = "INSTANCE_OF"
+                    edge["description"] = "Indicates that an entity is an instance of a specific class."
 
         # Propagate relationships from instances to their corresponding classes.
         # This creates higher-level relationships between classes based on the relationships between their instances.
         for rel in relationships:
             source_class_id = class_id_map.get(rel.get("source"))
-            target_class_id = class_id_map.get(rel.get("target")),
+            target_class_id = class_id_map.get(rel.get("target"))
             if source_class_id and target_class_id and source_class_id != target_class_id:
-                new_relationships.append({
-                    "source": source_class_id,
-                    "target": target_class_id,
-                    "type": rel.get("type"),
-                    "properties": rel.get("properties", {})
-                })
+                source_vertex = new_graph.vs.find(name=source_class_id)
+                target_vertex = new_graph.vs.find(name=target_class_id)
+                if source_vertex and target_vertex:
+                    edge = new_graph.add_edge(source_vertex, target_vertex)
+                    edge["type"] = rel.get("type")
+                    for k, v in rel.get("properties", {}).items():
+                        edge[k] = v
 
-        data["entities"] = new_entities
-        data["relationships"] = new_relationships
-        
-        logging.info(f"Clustering complete. Result: {len(new_entities)} entities, {len(new_relationships)} relationships.")
-        return data
+        logging.info(f"Clustering complete. Result: {new_graph.vcount()} entities, {new_graph.ecount()} relationships.")
+        return new_graph
 
     def deduplicate_entities(self, data):
         """
@@ -440,7 +417,7 @@ class GraphProcessor:
         logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities.")
         return data
 
-    def run_igraph_community_detection(self, data):
+    def run_igraph_community_detection(self, graph: ig.Graph):
         """
         Performs community detection on the graph using igraph's maximal cliques algorithm.
         It identifies densely connected groups of entities (cliques) and creates new 'Community'
@@ -448,56 +425,35 @@ class GraphProcessor:
         communities.
 
         Args:
-            data (dict): A dictionary containing 'entities' and 'relationships'.
+            graph (igraph.Graph): The input graph containing entities and relationships.
 
         Returns:
-            dict: The updated data dictionary with new 'Community' entities added and
-                  original entities updated with their community affiliations.
+            igraph.Graph: The updated graph with new 'Community' entities added and
+                          original entities updated with their community affiliations.
         """
         logging.info("Running igraph community detection...")
-        entities = data.get("entities", [])
-        relationships = data.get("relationships", [])
 
-        # Create a mapping from entity ID to igraph vertex index, ensuring entities have IDs.
-        valid_entities = [e for e in entities if e.get("id") is not None]
-        id_to_vertex = {entity["id"]: i for i, entity in enumerate(valid_entities)}
-        
-        # Initialize an igraph graph and add vertices based on the valid entities.
-        g = ig.Graph(directed=False)
-        g.add_vertices(len(valid_entities))
-        
-        # Assign entity properties to igraph vertex attributes.
-        g.vs["id"] = [entity["id"] for entity in valid_entities]
-        g.vs["type"] = [entity.get("type") for entity in valid_entities]
-        g.vs["properties"] = [entity.get("properties", {}) for entity in valid_entities]
-        g.vs["embedding"] = [entity.get("clustering_embedding") for entity in valid_entities]
-
-        # Add edges to the igraph graph based on the relationships.
-        edges = []
-        for rel in relationships:
-            source_id = rel.get("source")
-            target_id = rel.get("target")
-            if source_id in id_to_vertex and target_id in id_to_vertex:
-                edges.append((id_to_vertex[source_id], id_to_vertex[target_id]))
-        g.add_edges(edges)
+        if not graph.vcount():
+            return graph
 
         # Find maximal cliques, which represent the communities.
-        cliques = g.maximal_cliques()
+        cliques = graph.maximal_cliques()
         
-        community_summaries = {} # Initialize a dictionary to store summaries for each community.
-        for entity in entities:
-            entity_id = entity.get("id")
-            if not entity_id:
-                logging.warning(f"Skipping entity in community detection due to missing id: {entity}")
-                continue
-            entity["communities"] = [] # Initialize an empty list to store community IDs for each entity.
+        community_summaries = {} # Initialize a dictionary to store summaries for each community. 
+        
+        # Add a 'communities' attribute to all vertices if it doesn't exist
+        if "communities" not in graph.vs.attributes():
+            graph.vs["communities"] = [[] for _ in range(graph.vcount())]
+
+        for i, v in enumerate(graph.vs):
+            entity_id = v["name"]
             
             # Prepare a summary for the entity to be used in community summaries.
             entity_summary_parts = []
-            if entity.get("type"):
-                entity_summary_parts.append(f"Type: {entity.get('type')}")
-            summary = entity.get("properties", {}).get("summary")
-            name = entity.get("properties", {}).get("name")
+            if v.get("type"):
+                entity_summary_parts.append(f"Type: {v.get('type')}")
+            summary = v.get("summary")
+            name = v.get("name")
             if summary:
                 entity_summary_parts.append(f"Summary: {summary}")
             elif name:
@@ -506,10 +462,10 @@ class GraphProcessor:
             entity_text_for_summary = ", ".join(entity_summary_parts) if entity_summary_parts else entity_id
 
             # Assign entities to communities (cliques) they belong to.
-            for i, clique in enumerate(cliques):
-                if id_to_vertex.get(entity_id) is not None and id_to_vertex[entity_id] in clique:
-                    community_id = f"clique_{i}" # Generate a unique ID for the community.
-                    entity["communities"].append(community_id) # Associate the entity with this community.
+            for j, clique in enumerate(cliques):
+                if i in clique:
+                    community_id = f"clique_{j}" # Generate a unique ID for the community.
+                    v["communities"].append(community_id) # Associate the entity with this community. 
                     
                     # Aggregate entity summaries for each community.
                     if community_id not in community_summaries:
@@ -536,76 +492,53 @@ class GraphProcessor:
 
             semantic_search_embedding = all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
             
-            community_entity = {
-                "id": comm_id,
-                "type": "Community",
-                "Summary": full_community_summary,
-                "properties": {
-                    "community_type": "structural"
-                },
-                "cluster_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
-                "embedding": semantic_search_embedding, # Use semantic search embedding for the main embedding field
-                "communities": [] # Communities of a community entity are not relevant in this context.
+            community_entity_properties = {
+                "community_type": "structural",
+                "Summary": full_community_summary
             }
-            new_community_entities.append(community_entity)
+            
+            # Add the new community as a vertex to the graph
+            community_vertex = graph.add_vertex(name=comm_id)
+            community_vertex["type"] = "Community"
+            for k, v in community_entity_properties.items():
+                community_vertex[k] = v
+            community_vertex["cluster_embedding"] = all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
+            community_vertex["embedding"] = semantic_search_embedding
+            community_vertex["communities"] = [] # Communities of a community entity are not relevant in this context.
 
-        # Extend the main entities list with the newly created 'Community' entities.
-        logging.info(f"New Community Entities created: {[e['id'] for e in new_community_entities]}")
-        entities.extend(new_community_entities)
-        logging.info(f"Entities after extending with new Community Entities: {[e['id'] for e in entities if e.get('type') == 'Community']}")
+        logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(community_summaries)} standard Community entities.")
+        return graph
 
-        logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(new_community_entities)} standard Community entities.")
-        return data
-
-    def remove_entities_with_null_keys_and_relationships(self, data):
+    def remove_entities_with_null_keys_and_relationships(self, graph: ig.Graph):
         """
         Removes entities that have null or empty IDs and any relationships connected to them.
         This is a data cleaning step to ensure graph integrity before persistence.
 
         Args:
-            data (dict): A dictionary containing 'entities' and 'relationships'.
+            graph (igraph.Graph): The input graph.
 
         Returns:
-            dict: The updated data dictionary with invalid entities and their relationships removed.
+            igraph.Graph: The updated graph with invalid entities and their relationships removed.
         """
         logging.info("Starting removal of entities with null/empty IDs and their relationships...")
-        entities = data.get("entities", [])
-        relationships = data.get("relationships", [])
 
-        logging.info(f"Entities before removal: {[e['id'] for e in entities if e.get('type') == 'Community']}")
+        if not graph.vcount():
+            return graph
 
-        entities_to_remove_ids = set()
-        cleaned_entities = []
-
-        # Identify entities with null or empty IDs.
-        for entity in entities:
-            entity_id = entity.get("id")
+        vertices_to_remove = []
+        for v in graph.vs:
+            entity_id = v["name"]
             if entity_id is None or str(entity_id).strip() == "":
-                entities_to_remove_ids.add(entity_id)
-                logging.warning(f"Removing entity with null/empty ID: {entity}")
-            else:
-                cleaned_entities.append(entity)
+                vertices_to_remove.append(v.index)
+                logging.warning(f"Removing entity with null/empty ID: {v.attributes()}")
         
-        if not entities_to_remove_ids:
-            logging.info("No entities with null/empty IDs found. Skipping relationship filtering.")
-            logging.info(f"Entities after removal (no changes): {[e['id'] for e in cleaned_entities if e.get('type') == 'Community']}")
-            return data
+        if vertices_to_remove:
+            graph.delete_vertices(vertices_to_remove)
+            logging.info(f"Removed {len(vertices_to_remove)} entities with null/empty IDs.")
+        else:
+            logging.info("No entities with null/empty IDs found.")
 
-        # Remove relationships connected to the identified invalid entities.
-        cleaned_relationships = []
-        for rel in relationships:
-            source_id = rel.get("source")
-            target_id = rel.get("target")
-            if source_id in entities_to_remove_ids or target_id in entities_to_remove_ids:
-                logging.warning(f"Removing relationship connected to null/empty ID entity: {rel}")
-            else:
-                cleaned_relationships.append(rel)
-
-        data["entities"] = cleaned_entities
-        data["relationships"] = cleaned_relationships
-        logging.info(f"Finished removal. {len(entities) - len(cleaned_entities)} entities and {len(relationships) - len(cleaned_relationships)} relationships removed.")
-        logging.info(f"Entities after removal: {[e['id'] for e in cleaned_entities if e.get('type') == 'Community']}")
-        return data
+        return graph
 
 def generate_class_eid(name):
     """

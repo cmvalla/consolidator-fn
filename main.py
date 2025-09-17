@@ -23,7 +23,6 @@ import datetime # Added for timestamp in GCS object name
 
 from clients import ClientFactory
 from pubsub_handler import decode_pubsub_message
-from redis_operations import RedisOperations
 from llm_operations import LLMOperations
 from graph_processing import GraphProcessor
 from spanner_operations import SpannerOperations
@@ -48,8 +47,6 @@ def consolidator(cloud_event):
         # potential connection issues or resource leaks across invocations.
         client_factory = ClientFactory()
         logging.info("ClientFactory initialized.")
-        redis_client = client_factory.get_redis_client()
-        logging.info("Redis client initialized.")
         llm = client_factory.get_llm()
         logging.info("LLM client initialized.")
         publisher = pubsub_v1.PublisherClient()
@@ -57,8 +54,6 @@ def consolidator(cloud_event):
         spanner_client = client_factory.get_spanner_client()
         logging.info("Spanner client initialized.")
 
-        redis_ops = RedisOperations(redis_client)
-        logging.info("RedisOperations initialized.")
         llm_ops = LLMOperations(llm)
         logging.info("LLMOperations initialized.")
         graph_processor = GraphProcessor(llm_ops)
@@ -76,9 +71,16 @@ def consolidator(cloud_event):
         logging.info(f"System Memory: Total={memory_info.total / 1024**3:.2f}GB, Available={memory_info.available / 1024**3:.2f}GB, Used={memory_info.used / 1024**3:.2f}GB, Percentage={memory_info.percent}%")
 
         # Decode the Pub/Sub message that triggered this Cloud Function.
-        # The message is expected to contain a 'batch_id' which identifies the data batch to be processed.
+        # The message is expected to contain a 'batch_id' and 'gcs_paths' which identifies the data batch to be processed.
         data = decode_pubsub_message(cloud_event)
         batch_id = data.get("batch_id")
+        gcs_paths = data.get("gcs_paths", [])
+
+        if not gcs_paths:
+            logging.error(f"No GCS paths found in Pub/Sub message for batch {batch_id}. Stopping execution.")
+            if batch_id:
+                spanner_ops.release_lock(batch_id, "FAILED")
+            return None
 
         # Retrieve the Pub/Sub topic name for the 'persistor' function from environment variables.
         # This topic is used to send the processed graph data to the next stage of the pipeline.
@@ -104,45 +106,58 @@ def consolidator(cloud_event):
             return None
 
         try:
-            # Fetch partial graph data (entities and relationships) from Redis using the batch_id.
-            # Redis acts as a temporary store for intermediate results from the 'worker' function.
-            fetched_data = redis_ops.fetch_from_redis(data)
-            if not fetched_data.get("partial_results"):
-                logging.info(f"No data found in Redis for batch {data.get('batch_id')}. Stopping execution.")
-                # Release the lock with a 'FAILED' status as no data was found to process.
+            # Download and deserialize igraph objects from GCS
+            storage_client = storage.Client()
+            merged_graph = ig.Graph()
+
+            for path in gcs_paths:
+                try:
+                    bucket_name = path.split("//")[1].split("/")[0]
+                    blob_name = "/".join(path.split("//")[1].split("/")[1:])
+                    bucket = storage_client.bucket(bucket_name)
+                    blob = bucket.blob(blob_name)
+                    
+                    downloaded_blob = blob.download_as_bytes()
+                    worker_graph = pickle.loads(downloaded_blob)
+                    
+                    # Merge worker_graph into merged_graph
+                    # This is a simplified merge. A more robust merge would handle overlapping entities/relationships
+                    # based on IDs and update properties accordingly.
+                    merged_graph = ig.Graph.union(merged_graph, worker_graph)
+                    logging.info(f"Successfully downloaded and merged graph from {path}")
+                except Exception as e:
+                    logging.error(f"Error downloading or deserializing graph from {path}: {e}", exc_info=True)
+                    # Continue processing other graphs, but log the error
+            
+            if not merged_graph.vcount():
+                logging.info(f"No graph data found after merging for batch {batch_id}. Stopping execution.")
                 spanner_ops.release_lock(batch_id, "FAILED")
                 return None
 
             # --- Graph Processing Pipeline ---
-            # 1. Aggregate results from potentially multiple partial results fetched from Redis.
-            # This step combines all extracted entities and relationships into a single coherent graph structure.
-            aggregated_data = graph_processor.aggregate_results(fetched_data)
-            # 2. Generate embeddings for entities. Embeddings are numerical representations
+            # The graph_processor now directly receives the merged igraph
+            # 1. Generate embeddings for entities. Embeddings are numerical representations
             # that capture the semantic meaning of entities, crucial for clustering and similarity searches.
-            embedded_data = llm_ops.generate_embeddings(aggregated_data)
-            # 3. Cluster and merge similar entities. This step identifies and groups
+            embedded_graph = llm_ops.generate_embeddings(merged_graph)
+            # 2. Cluster and merge similar entities. This step identifies and groups
             # entities that represent the same real-world concept, creating 'Class' nodes.
-            clustered_data = graph_processor.cluster_and_merge_entities(embedded_data)
-            # 4. Deduplicate entities to resolve any remaining duplicate IDs or representations
+            clustered_graph = graph_processor.cluster_and_merge_entities(embedded_graph)
+            # 3. Deduplicate entities to resolve any remaining duplicate IDs or representations
             # before community detection, ensuring data integrity.
-            deduplicated_data = graph_processor.deduplicate_entities(clustered_data)
-            # 5. Run community detection algorithms (e.g., maximal cliques) on the graph.
+            deduplicated_graph = graph_processor.deduplicate_entities(clustered_graph)
+            # 4. Run community detection algorithms (e.g., maximal cliques) on the graph.
             # This identifies densely connected groups of entities, forming 'Community' nodes.
-            community_data = graph_processor.run_igraph_community_detection(deduplicated_data)
-            # 6. Remove any entities or relationships that might have null or empty IDs,
+            community_graph = graph_processor.run_igraph_community_detection(deduplicated_graph)
+            # 5. Remove any entities or relationships that might have null or empty IDs,
             # ensuring the final graph structure is valid before persistence.
-            new_community_data = graph_processor.remove_entities_with_null_keys_and_relationships(community_data)
+            final_graph = graph_processor.remove_entities_with_null_keys_and_relationships(community_graph)
             
-            # The original code had a commented-out section for saving processed data to Redis.
-            # This indicates a design decision to directly pass data to the persistor via GCS/PubSub
-            # rather than using Redis as an intermediate store for processed graph data.
-
             # Serialize the processed igraph object and upload it to Google Cloud Storage (GCS).
             # GCS is used for durable storage of the large graph object, as Pub/Sub messages have size limits.
-            if new_community_data:
+            if final_graph:
                 try:
                     # Use pickle for serialization of the Python object (igraph graph).
-                    serialized_graph = pickle.dumps(new_community_data)
+                    serialized_graph = pickle.dumps(final_graph)
                     
                     # Get the GCS bucket name from environment variables.
                     gcs_bucket_name = os.environ.get("GRAPH_DATA_BUCKET_NAME")
