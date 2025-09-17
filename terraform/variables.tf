@@ -33,16 +33,6 @@ variable "image_tag" {
   type        = string
 }
 
-variable "redis_host" {
-  description = "The Redis host."
-  type        = string
-}
-
-variable "redis_port" {
-  description = "The Redis port."
-  type        = number
-}
-
 variable "spanner_instance_id" {
   description = "The Spanner instance ID."
   type        = string

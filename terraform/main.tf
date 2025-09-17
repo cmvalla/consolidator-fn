@@ -35,14 +35,6 @@ resource "google_cloud_run_v2_service" "consolidator" {
           name  = "GOOGLE_CLOUD_PROJECT"
           value = var.project_id
         }
-        env {
-          name  = "REDIS_HOST"
-          value = var.redis_host
-        }
-        env {
-          name  = "REDIS_PORT"
-          value = var.redis_port
-        }
         
         env {
           name  = "SPANNER_INSTANCE_ID"
