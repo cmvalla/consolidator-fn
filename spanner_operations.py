@@ -59,7 +59,7 @@ class SpannerOperations:
                 if status == "PROCESSING":
                     # Check for lock expiration
                     # This is a simplified example, you might want to use a more robust time comparison
-                                        if lock_timestamp and (datetime.now(timezone.utc) - lock_timestamp).total_seconds() > 300:
+                    if lock_timestamp and (datetime.now(timezone.utc) - lock_timestamp).total_seconds() > 300:
                         logging.warning(f"Lock for batch {batch_id} has expired. Stealing lock.")
                         transaction.update(
                             table="WorkflowStatus",
