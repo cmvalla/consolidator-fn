@@ -522,7 +522,7 @@ class GraphProcessor:
             entities_description = " ".join(entity_texts)
 
             # Generate summary using LLM
-                        full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description})['text']
+            full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description})['text']
 
             if not full_community_summary:
                 logging.warning(f"Skipping Community entity creation for {comm_id} due to empty summary.")
