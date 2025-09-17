@@ -13,6 +13,7 @@ class ClientFactory:
     def __init__(self):
         self._redis_client = None
         self._llm = None
+        self._json_llm = None
         self._db_session = None
         self._db_engine = None
         self._sm_client = None
@@ -47,6 +48,26 @@ class ClientFactory:
                     pass
             self._llm = ChatGoogleGenerativeAI(model=Config.LLM_MODEL_NAME, google_api_key=gemini_api_key)
         return self._llm
+
+    def get_json_llm(self):
+        if self._json_llm is None:
+            gemini_api_key = None
+            if Config.GEMINI_API_KEY_SECRET_ID:
+                sm_client = self.get_sm_client()
+                try:
+                    gemini_api_key = sm_client.access_secret_version(request={"name": Config.GEMINI_API_KEY_SECRET_ID}).payload.data.decode("UTF-8")
+                except Exception as e:
+                    # log the error
+                    pass
+            
+            generation_config = {"response_mime_type": "application/json"}
+            
+            self._json_llm = ChatGoogleGenerativeAI(
+                model=Config.LLM_MODEL_NAME,
+                google_api_key=gemini_api_key,
+                generation_config=generation_config
+            )
+        return self._json_llm
 
     def get_db_session(self):
         if self._db_session is None:
