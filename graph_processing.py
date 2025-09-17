@@ -492,10 +492,12 @@ class GraphProcessor:
             entity_summary_parts = []
             if entity.get("type"):
                 entity_summary_parts.append(f"Type: {entity.get('type')}")
-            if entity.get("properties", {}).get("summary"):
-                entity_summary_parts.append(f"Summary: {entity['properties']['summary']}")
-            elif entity.get("properties", {}).get("name"):
-                entity_summary_parts.append(f"Name: {entity['properties']['name']}")
+            summary = entity.get("properties", {}).get("summary")
+            name = entity.get("properties", {}).get("name")
+            if summary:
+                entity_summary_parts.append(f"Summary: {summary}")
+            elif name:
+                entity_summary_parts.append(f"Name: {name}")
             
             entity_text_for_summary = ", ".join(entity_summary_parts) if entity_summary_parts else entity_id
 
