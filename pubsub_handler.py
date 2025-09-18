@@ -13,4 +13,4 @@ def decode_pubsub_message(cloud_event):
 
     message_data = base64.b64decode(event_data["message"]["data"]).decode("utf-8")
     message_json = json.loads(message_data)
-    return {"batch_id": message_json.get("batch_id")}
+    return message_json
