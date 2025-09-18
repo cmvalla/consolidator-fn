@@ -18,6 +18,7 @@ from google.cloud import pubsub_v1 # Added for Pub/Sub publishing
 import pickle # Added for igraph serialization
 from google.cloud import storage # Added for GCS operations
 import datetime # Added for timestamp in GCS object name
+import igraph as ig
 
 # Forced rebuild comment: 2025-09-07-4
 
