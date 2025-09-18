@@ -137,10 +137,7 @@ def consolidator(cloud_event):
 
             # --- Graph Processing Pipeline ---
             # The graph_processor now directly receives the merged igraph
-            # 1. Generate embeddings for entities. Embeddings are numerical representations
-            # that capture the semantic meaning of entities, crucial for clustering and similarity searches.
-            embedded_graph = llm_ops.generate_embeddings(merged_graph)
-            # 2. Cluster and merge similar entities. This step identifies and groups
+            embedded_graph = merged_graph            # 2. Cluster and merge similar entities. This step identifies and groups
             # entities that represent the same real-world concept, creating 'Class' nodes.
             clustered_graph = graph_processor.cluster_and_merge_entities(embedded_graph)
             # 3. Deduplicate entities to resolve any remaining duplicate IDs or representations
