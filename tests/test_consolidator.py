@@ -1,6 +1,4 @@
-import pytest
 from unittest.mock import Mock, patch
-import sys
 
 # The rest of the test file remains the same
 @patch("main.ClientFactory")
@@ -12,7 +10,7 @@ import sys
 @patch("clients.secretmanager.SecretManagerServiceClient") # Patch SecretManagerServiceClient
 def test_consolidator_orchestration(mock_psutil, mock_decode_pubsub, mock_client_factory, mock_redis_class, mock_create_engine, mock_chat_google_generative_ai, mock_secret_manager_client):
     # Import main *inside* the test function, after patches are applied
-    from main import consolidator, ClientFactory, RedisOperations, SpannerOperations, LLMOperations, GraphProcessor, decode_pubsub_message
+    from main import consolidator
 
     # Mock psutil
     mock_memory_info = Mock()

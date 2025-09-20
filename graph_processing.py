@@ -6,12 +6,9 @@ import uuid
 import json
 from sklearn.metrics.pairwise import cosine_similarity
 from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import Config
-from llm_operations import LLMOperations
-from llm_operations import CLASS_PROPERTY_GENERATION_PROMPT, SUMMARY_PROMPT, CLASS_SCHEMA
+from llm_operations import SUMMARY_PROMPT, CLASS_SCHEMA
 import hashlib
 
 class GraphProcessor:
@@ -43,37 +40,50 @@ class GraphProcessor:
         # Extract entities and relationships from the graph
         entities = []
         for v in graph.vs:
-            entity = {"id": v["name"], "type": v.get("type"), "properties": v.attributes()}
-            # Remove igraph internal attributes
-            entity["properties"].pop("name", None)
-            entity["properties"].pop("type", None)
-            entities.append(entity)
+            # Start with all attributes, then refine
+            all_attributes = v.attributes()
+            
+            # Extract 'properties' and parse it from JSON string to dict
+            properties_json_str = all_attributes.get("properties", "{}")
+            try:
+                parsed_properties = json.loads(properties_json_str)
+            except json.JSONDecodeError:
+                logging.warning(f"Could not decode properties JSON for entity {v['name']}: {properties_json_str}")
+                parsed_properties = {} # Default to empty dict on error
 
+            entity = {
+                "id": v["name"],
+                "type": all_attributes.get("type"), # Use .get for safety
+                "properties": parsed_properties
+            }
+            
+            # Add other relevant attributes directly to the entity if they are not 'name', 'type', or 'properties'
+            for key, value in all_attributes.items():
+                if key not in ["name", "type", "properties", "embedding", "cluster_embedding", "retrieval_document_embedding"]:
+                    entity["properties"][key] = value
+            
+            # Handle embeddings separately as they are not part of 'properties'
+            if "embedding" in all_attributes:
+                entity["embedding"] = all_attributes["embedding"]
+            if "cluster_embedding" in all_attributes:
+                entity["cluster_embedding"] = all_attributes["cluster_embedding"]
+            if "retrieval_document_embedding" in all_attributes:
+                entity["retrieval_document_embedding"] = all_attributes["retrieval_document_embedding"]
+
+            entities.append(entity)
         relationships = []
         for e in graph.es:
             rel = {
                 "source": graph.vs[e.source]["name"],
                 "target": graph.vs[e.target]["name"],
-                "type": e.get("type"),
+                "type": e["type"] if "type" in e.attributes() else None,
                 "properties": e.attributes()
             }
             rel["properties"].pop("type", None)
             relationships.append(rel)
 
         id_to_entity = {entity['id']: entity for entity in entities}
-
-        # Map entity IDs to their source text (from chunks) for LLM context during class property generation.
-        entity_id_to_source_text = {}
-        for rel in relationships:
-            if rel.get("type") == "ARE_PART_OF_CHUNK":
-                entity_id = rel.get("source")
-                chunk_id = rel.get("target")
-                if entity_id and chunk_id:
-                    chunk_entity = id_to_entity.get(chunk_id)
-                    if chunk_entity and chunk_entity.get("type") == "Chunk":
-                        original_text = chunk_entity.get("properties", {}).get("original_text")
-                        if original_text:
-                            entity_id_to_source_text[entity_id] = original_text
+        entity_id_to_source_text = {} # Initialize as empty for now, needs to be populated from graph attributes if available
 
         # Filter out 'Chunk' and 'Community' entities as they are not subject to clustering in this step.
         clusterable_entities = [e for e in entities if e.get("type") not in ["Chunk", "Community"]]
@@ -126,8 +136,8 @@ class GraphProcessor:
             clusters.append(cluster)
 
         # Initialize LLM chains for generating class properties and summaries.
-        class_property_chain = LLMChain(llm=self.llm_ops.llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
-        summarization_chain = LLMChain(llm=self.llm_ops.llm, prompt=SUMMARY_PROMPT)
+        # class_property_chain = LLMChain(llm=self.llm_ops.llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
+        # summarization_chain = LLMChain(llm=self.llm_ops.llm, prompt=SUMMARY_PROMPT)
 
         name_to_class_entity = {}
         class_id_map = {}
@@ -147,7 +157,7 @@ class GraphProcessor:
                 if member_entity:
                     properties = member_entity.get('properties', {})
                     instances_text_parts.append(f"- {json.dumps(properties)}")
-                    source_text = entity_id_to_source_text.get(member_id)
+                    source_text = entity_id_to_source_text.get(member_id) # This will be empty for now
                     if source_text:
                         source_text_parts.add(source_text)
                     
@@ -175,7 +185,7 @@ class GraphProcessor:
         # Process clusters in batches to generate class properties using the LLM.
         for i in range(0, total_clusters, Config.LLM_BATCH_SIZE):
             batch_inputs = batched_llm_inputs[i:i + Config.LLM_BATCH_SIZE]
-            batch_cluster_info = cluster_info_list[i:i + Config.LLM_BATCH_SIZE]
+            # batch_cluster_info = cluster_info_list[i:i + Config.LLM_BATCH_SIZE]
 
             try:
                 # Call the LLM with the batched inputs to generate properties for the classes.
@@ -251,6 +261,12 @@ class GraphProcessor:
             except Exception as e:
                 logging.error(f"Failed to process generated properties for cluster {cluster_info}: {e}", exc_info=True)
 
+        # Collect all entities for the new graph: existing entities not clustered, and new class entities
+        new_entities = []
+        for entity in entities:
+            if entity["id"] not in class_id_map: # If not mapped to a class, add as is
+                new_entities.append(entity)
+        new_entities.extend(name_to_class_entity.values())
 
         new_graph = ig.Graph(directed=True) # Create a new graph to build the result
         new_graph.add_vertices(len(new_entities))
@@ -450,10 +466,10 @@ class GraphProcessor:
             
             # Prepare a summary for the entity to be used in community summaries.
             entity_summary_parts = []
-            if v.get("type"):
-                entity_summary_parts.append(f"Type: {v.get('type')}")
-            summary = v.get("summary")
-            name = v.get("name")
+            if v.attributes().get("type"):
+                entity_summary_parts.append(f"Type: {v.attributes().get('type')}")
+            summary = v.attributes().get("summary")
+            name = v.attributes().get("name")
             if summary:
                 entity_summary_parts.append(f"Summary: {summary}")
             elif name:
@@ -472,7 +488,7 @@ class GraphProcessor:
                         community_summaries[community_id] = []
                     community_summaries[community_id].append(entity_text_for_summary)
 
-        new_community_entities = []
+        # new_community_entities = []
         # Create new 'Community' entities based on the detected communities.
         for comm_id, entity_texts in community_summaries.items():
             entities_description = " ".join(entity_texts)
@@ -555,3 +571,73 @@ def generate_class_eid(name):
         return None
     # Use SHA256 hash to create a consistent and unique ID
     return hashlib.sha256(name.encode('utf-8')).hexdigest()
+
+def _graph_to_dict(graph: ig.Graph) -> dict:
+    """
+    Converts an igraph.Graph object into a dictionary format with 'entities' and 'relationships' keys.
+    This format is expected by the deduplicate_entities method.
+    """
+    entities = []
+    for v in graph.vs:
+        entity_properties = {k: v[k] for k in v.attributes() if k not in ["name", "type", "embedding", "cluster_embedding", "retrieval_document_embedding"]}
+        entity = {
+            "id": v["name"],
+            "type": v["type"] if "type" in v.attributes() else None,
+            "properties": entity_properties
+        }
+        if "embedding" in v.attributes():
+            entity["embedding"] = v["embedding"]
+        if "cluster_embedding" in v.attributes():
+            entity["cluster_embedding"] = v["cluster_embedding"]
+        if "retrieval_document_embedding" in v.attributes():
+            entity["retrieval_document_embedding"] = v["retrieval_document_embedding"]
+        entities.append(entity)
+
+    relationships = []
+    for e in graph.es:
+        rel_properties = {k: e[k] for k in e.attributes() if k not in ["type"]}
+        rel = {
+            "source": graph.vs[e.source]["name"],
+            "target": graph.vs[e.target]["name"],
+            "type": e["type"] if "type" in e.attributes() else None,
+            "properties": rel_properties
+        }
+        relationships.append(rel)
+
+    return {"entities": entities, "relationships": relationships}
+
+def _dict_to_graph(data: dict) -> ig.Graph:
+    """
+    Converts a dictionary with 'entities' and 'relationships' keys back into an igraph.Graph object.
+    """
+    graph = ig.Graph(directed=True)
+    
+    # Add vertices
+    for entity in data.get("entities", []):
+        vertex_attrs = {
+            "name": entity["id"],
+            "type": entity.get("type"),
+            "properties": json.dumps(entity.get("properties", {})), # Store properties as JSON string
+        }
+        if "embedding" in entity:
+            vertex_attrs["embedding"] = entity["embedding"]
+        if "cluster_embedding" in entity:
+            vertex_attrs["cluster_embedding"] = entity["cluster_embedding"]
+        if "retrieval_document_embedding" in entity:
+            vertex_attrs["retrieval_document_embedding"] = entity["retrieval_document_embedding"]
+        graph.add_vertex(**vertex_attrs)
+
+    # Add edges
+    for rel in data.get("relationships", []):
+        try:
+            source_vertex = graph.vs.find(name=rel["source"])
+            target_vertex = graph.vs.find(name=rel["target"])
+            edge_attrs = {
+                "type": rel.get("type"),
+                "properties": json.dumps(rel.get("properties", {})), # Store properties as JSON string
+            }
+            graph.add_edge(source_vertex, target_vertex, **edge_attrs)
+        except ValueError as e:
+            logging.warning(f"Could not add edge for relationship {rel}: {e}")
+
+    return graph

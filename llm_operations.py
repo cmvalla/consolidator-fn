@@ -9,6 +9,8 @@ from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 
 from config import Config
+import google.auth
+import google.auth.transport.requests
 
 CLASS_SCHEMA = {
     "type": "object",
@@ -62,14 +64,16 @@ class LLMOperations:
 
         while retries < MAX_RETRIES:
             try:
-                token_url = f"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={embedding_service_url}"
-                token_response = requests.get(token_url, headers={"Metadata-Flavor": "Google"})
-                token = token_response.text
-                headers = {"Authorization": f"Bearer {token}"}
+                # Use google.auth to get credentials
+                credentials, project = google.auth.default()
+                
+                # Create an AuthorizedSession to handle authentication
+                # This will automatically fetch and refresh ID tokens for Cloud Run services
+                authed_session = google.auth.transport.requests.AuthorizedSession(credentials)
                 
                 payload = {"text": text, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]}
-                logging.info(f"Sending embedding request for entity {entity_id}: url={embedding_service_url}, payload={payload}, headers={{'Authorization': 'Bearer ...'}}")
-                response = requests.post(embedding_service_url, json=payload, headers=headers)
+                logging.info(f"Sending embedding request for entity {entity_id}: url={embedding_service_url}, payload={payload}")
+                response = authed_session.post(embedding_service_url, json=payload)
                 logging.info(f"Received raw embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
                 
                 if response.status_code == 200:
@@ -120,14 +124,16 @@ class LLMOperations:
 
         while retries < MAX_RETRIES:
             try:
-                token_url = f"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={embedding_service_url}"
-                token_response = requests.get(token_url, headers={"Metadata-Flavor": "Google"})
-                token = token_response.text
-                headers = {"Authorization": f"Bearer {token}"}
+                # Use google.auth to get credentials
+                credentials, project = google.auth.default()
+                
+                # Create an AuthorizedSession to handle authentication
+                # This will automatically fetch and refresh ID tokens for Cloud Run services
+                authed_session = google.auth.transport.requests.AuthorizedSession(credentials)
                 
                 payload = {"texts": texts, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]} # Use 'texts' key for batch
-                logging.info(f"Sending batch embedding request: url={embedding_service_url}, payload_size={len(texts)}, headers={{'Authorization': 'Bearer ...'}}")
-                response = requests.post(embedding_service_url, json=payload, headers=headers)
+                logging.info(f"Sending batch embedding request: url={embedding_service_url}, payload_size={len(texts)}")
+                response = authed_session.post(embedding_service_url, json=payload)
                 logging.info(f"Received raw batch embedding response (Status: {response.status_code}): {response.text}")
                 
                 if response.status_code == 200:

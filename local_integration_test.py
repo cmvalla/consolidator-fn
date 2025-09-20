@@ -8,7 +8,7 @@ from llm_operations import LLMOperations
 from config import Config
 
 from langchain_core.messages import AIMessage
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 # Configure logging for better visibility
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')

@@ -1,7 +1,6 @@
 # Tests for graph_processing.py
 import pytest
-from unittest.mock import Mock, patch
-import json
+from unittest.mock import Mock
 
 from graph_processing import GraphProcessor
 from tests.test_data import redis_data

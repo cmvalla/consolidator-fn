@@ -6,6 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from langchain_google_genai import ChatGoogleGenerativeAI
 from google.cloud.spanner_v1 import Client as SpannerClient
+from google.cloud import pubsub_v1 # Added missing import
+from google.cloud import storage # Added missing import
 
 from config import Config
 
@@ -18,11 +20,23 @@ class ClientFactory:
         self._db_engine = None
         self._sm_client = None
         self._spanner_client = None
+        self._publisher = None  # Initialize publisher client
+        self._storage_client = None # Initialize storage client
 
     def get_spanner_client(self):
         if self._spanner_client is None:
-            self._spanner_client = SpannerClient()
+            self._spanner_client = SpannerClient(project=Config.GCP_PROJECT)
         return self._spanner_client
+
+    def get_publisher(self):
+        if self._publisher is None:
+            self._publisher = pubsub_v1.PublisherClient()
+        return self._publisher
+
+    def get_storage_client(self):
+        if self._storage_client is None:
+            self._storage_client = storage.Client()
+        return self._storage_client
 
     def get_sm_client(self):
         if self._sm_client is None:
@@ -43,7 +57,7 @@ class ClientFactory:
                 sm_client = self.get_sm_client()
                 try:
                     gemini_api_key = sm_client.access_secret_version(request={"name": Config.GEMINI_API_KEY_SECRET_ID}).payload.data.decode("UTF-8")
-                except Exception as e:
+                except Exception:
                     # log the error
                     pass
             self._llm = ChatGoogleGenerativeAI(model=Config.LLM_MODEL_NAME, google_api_key=gemini_api_key)
@@ -56,7 +70,7 @@ class ClientFactory:
                 sm_client = self.get_sm_client()
                 try:
                     gemini_api_key = sm_client.access_secret_version(request={"name": Config.GEMINI_API_KEY_SECRET_ID}).payload.data.decode("UTF-8")
-                except Exception as e:
+                except Exception:
                     # log the error
                     pass
             

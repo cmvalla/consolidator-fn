@@ -1,7 +1,6 @@
 # Tests for redis_operations.py
 import pytest
-from unittest.mock import Mock, patch
-import json
+from unittest.mock import Mock
 
 from redis_operations import RedisOperations
 from tests.test_data import redis_data

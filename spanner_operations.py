@@ -3,7 +3,6 @@ import logging
 from datetime import datetime, timezone
 from google.cloud.spanner_v1 import Client, KeySet, COMMIT_TIMESTAMP
 from google.cloud.spanner_v1.transaction import Transaction
-from google.cloud.spanner_v1.keyset import KeySet
 from google.api_core.exceptions import Aborted, NotFound
 
 class SpannerOperations:

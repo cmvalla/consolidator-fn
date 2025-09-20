@@ -1,8 +1,6 @@
 # Tests for llm_operations.py
 import pytest
 from unittest.mock import Mock, patch
-import json
-import os
 from langchain_core.messages import AIMessage
 
 from llm_operations import LLMOperations

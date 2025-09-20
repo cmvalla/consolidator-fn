@@ -1,0 +1,8 @@
+pytest
+google-cloud-pubsub
+google-cloud-spanner
+redis
+requests
+python-igraph
+google-cloud-secret-manager
+langchain-google-genai
