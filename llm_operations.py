@@ -73,7 +73,7 @@ class LLMOperations:
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {id_token}"
                 }
-                payload = {"text": text, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]}
+                payload = {"text": text, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"], "invocation_id": entity_id}
                 logging.info(f"Sending embedding request for entity {entity_id}: url={embedding_service_url}, payload={payload}")
                 response = requests.post(embedding_service_url, headers=headers, data=json.dumps(payload))
                 logging.info(f"Received raw embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
@@ -136,7 +136,7 @@ class LLMOperations:
                     "Authorization": f"Bearer {id_token}"
                 }
                 
-                payload = {"texts": texts, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]} # Use 'texts' key for batch
+                payload = {"texts": texts, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"], "invocation_id": uuid.uuid4().hex} # Use 'texts' key for batch
                 logging.info(f"Sending batch embedding request: url={embedding_service_url}, payload_size={len(texts)}")
                 response = requests.post(embedding_service_url, headers=headers, data=json.dumps(payload))
                 logging.info(f"Received raw batch embedding response (Status: {response.status_code}): {response.text}")
