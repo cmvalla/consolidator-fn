@@ -64,16 +64,18 @@ class LLMOperations:
 
         while retries < MAX_RETRIES:
             try:
-                # Use google.auth to get credentials
-                credentials, project = google.auth.default()
-                
-                # Create an AuthorizedSession to handle authentication
-                # This will automatically fetch and refresh ID tokens for Cloud Run services
-                authed_session = google.auth.transport.requests.AuthorizedSession(credentials)
-                
+                # Explicitly get an ID token for the Cloud Run service
+                auth_req = google.auth.transport.requests.Request()
+                id_token_raw = google.oauth2.id_token.fetch_id_token(auth_req, embedding_service_url)
+                id_token = id_token_raw if id_token_raw is not None else ""
+
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {id_token}"
+                }
                 payload = {"text": text, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]}
                 logging.info(f"Sending embedding request for entity {entity_id}: url={embedding_service_url}, payload={payload}")
-                response = authed_session.post(embedding_service_url, json=payload)
+                response = requests.post(embedding_service_url, headers=headers, data=json.dumps(payload))
                 logging.info(f"Received raw embedding response for entity {entity_id} (Status: {response.status_code}): {response.text}")
                 
                 if response.status_code == 200:
@@ -124,16 +126,19 @@ class LLMOperations:
 
         while retries < MAX_RETRIES:
             try:
-                # Use google.auth to get credentials
-                credentials, project = google.auth.default()
-                
-                # Create an AuthorizedSession to handle authentication
-                # This will automatically fetch and refresh ID tokens for Cloud Run services
-                authed_session = google.auth.transport.requests.AuthorizedSession(credentials)
+                # Explicitly get an ID token for the Cloud Run service
+                auth_req = google.auth.transport.requests.Request()
+                id_token_raw = google.oauth2.id_token.fetch_id_token(auth_req, embedding_service_url)
+                id_token = id_token_raw if id_token_raw is not None else ""
+
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {id_token}"
+                }
                 
                 payload = {"texts": texts, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"]} # Use 'texts' key for batch
                 logging.info(f"Sending batch embedding request: url={embedding_service_url}, payload_size={len(texts)}")
-                response = authed_session.post(embedding_service_url, json=payload)
+                response = requests.post(embedding_service_url, headers=headers, data=json.dumps(payload))
                 logging.info(f"Received raw batch embedding response (Status: {response.status_code}): {response.text}")
                 
                 if response.status_code == 200:
@@ -180,7 +185,7 @@ class LLMOperations:
                 backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
 
         logging.error(f"Failed to get embeddings after {MAX_RETRIES} retries.")
-        return [[0.0] * Config.EMBEDDING_DIMENSION] * len(texts)
+        return [{"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}] * len(texts)
 
 
 
