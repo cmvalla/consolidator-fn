@@ -11,6 +11,7 @@ from langchain.prompts import PromptTemplate
 from config import Config
 import google.auth
 import google.auth.transport.requests
+import google.oauth2.id_token
 
 CLASS_SCHEMA = {
     "type": "object",
