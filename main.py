@@ -25,43 +25,29 @@ from consolidator_service import ConsolidatorService # New import
 import uuid
 from google.cloud.logging.handlers import CloudLoggingHandler
 
-class InvocationIdFilter(logging.Filter):
-    def __init__(self, invocation_id: str):
-        super().__init__()
-        self.invocation_id = invocation_id
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        record.invocation_id = self.invocation_id
-        return True
-
 # --- Boilerplate and Configuration ---
 
 
 @functions_framework.cloud_event
 def consolidator(cloud_event):
     invocation_id = str(uuid.uuid4())
+    data = None # Initialize data to None
     
+    # Configure logging to use Cloud Logging
+    client = google.cloud.logging.Client()
+    handler = CloudLoggingHandler(client)
+    # Remove existing handlers to avoid duplicate logs in Cloud Logging
     root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-    
-    # Create a Cloud Logging handler
-    cloud_handler = CloudLoggingHandler(google.cloud.logging.Client())
-    
-    # Create a formatter that includes the invocation_id
-    formatter = logging.Formatter('%(levelname)s:%(name)s:%(invocation_id)s:%(message)s')
-    cloud_handler.setFormatter(formatter)
-    
-    # Add the handler and filter to the root logger
-    root_logger.setLevel(logging.DEBUG)
-    root_logger.addHandler(cloud_handler)
-    root_logger.addFilter(InvocationIdFilter(invocation_id))
+    for h in root_logger.handlers[:]:
+        root_logger.removeHandler(h)
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO) # Set default level to INFO
 
-    logging.info(f"Consolidator function started. Invocation ID: {invocation_id}")
-    logging.info(f"GRAPH_DATA_BUCKET_NAME from env: {os.environ.get('GRAPH_DATA_BUCKET_NAME')}")
-    batch_id = None
+    logging.info(f"Consolidator function started. Invocation ID: {invocation_id}", extra={'invocation_id': invocation_id})
+    logging.info(f"GRAPH_DATA_BUCKET_NAME from env: {os.environ.get('GRAPH_DATA_BUCKET_NAME')}", extra={'invocation_id': invocation_id})
+    
     try:
-        logging.info("Initializing clients...")
+        logging.info("Initializing clients...", extra={'invocation_id': invocation_id})
         client_factory = ClientFactory()
         llm = client_factory.get_llm()
         publisher = client_factory.get_publisher()
@@ -77,8 +63,8 @@ def consolidator(cloud_event):
 
         cpu_usage = psutil.cpu_percent(interval=1)
         memory_info = psutil.virtual_memory()
-        logging.info(f"System CPU Usage: {cpu_usage}%")
-        logging.info(f"System Memory: Total={memory_info.total / 1024**3:.2f}GB, Available={memory_info.available / 1024**3:.2f}GB, Used={memory_info.used / 1024**3:.2f}GB, Percentage={memory_info.percent}%")
+        logging.info(f"System CPU Usage: {cpu_usage}%", extra={'invocation_id': invocation_id})
+        logging.info(f"System Memory: Total={memory_info.total / 1024**3:.2f}GB, Available={memory_info.available / 1024**3:.2f}GB, Used={memory_info.used / 1024**3:.2f}GB, Percentage={memory_info.percent}%", extra={'invocation_id': invocation_id})
 
         data = decode_pubsub_message(cloud_event)
         batch_id = data.get("batch_id")
@@ -86,7 +72,7 @@ def consolidator(cloud_event):
 
         persistor_topic_name = os.environ.get("PERSISTOR_TOPIC_NAME")
         if not persistor_topic_name:
-            logging.error(f"PERSISTOR_TOPIC_NAME environment variable not set. Invocation ID: {invocation_id}")
+            logging.error(f"PERSISTOR_TOPIC_NAME environment variable not set. Invocation ID: {invocation_id}", extra={'invocation_id': invocation_id})
             if batch_id:
                 spanner_ops.release_lock(batch_id, "FAILED")
             return None
@@ -100,7 +86,7 @@ def consolidator(cloud_event):
 
     except Exception as e:
         batch_id = batch_id or (data and data.get("batch_id"))
-        logging.error(f'An error occurred in the consolidator for batch_id {batch_id}. Invocation ID: {invocation_id}: {e}', exc_info=True)
+        logging.error(f'An error occurred in the consolidator for batch_id {batch_id}. Invocation ID: {invocation_id}: {e}', exc_info=True, extra={'invocation_id': invocation_id})
         return None
     finally:
-        logging.info(f"--- END OF CONSOLIDATOR INVOCATION. Invocation ID: {invocation_id} ---")
+        logging.info(f"--- END OF CONSOLIDATOR INVOCATION. Invocation ID: {invocation_id} ---", extra={'invocation_id': invocation_id})

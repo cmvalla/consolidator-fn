@@ -84,7 +84,8 @@ def local_consolidator_service(real_llm_ops, real_graph_processor, real_spanner_
         graph_processor=real_graph_processor,
         spanner_ops=real_spanner_ops,
         publisher=mock_publisher,
-        storage_client=real_storage_client
+        storage_client=real_storage_client,
+        invocation_id=str(uuid.uuid4())
     )
 
 @pytest.fixture(scope="module")
@@ -182,8 +183,10 @@ def test_local_consolidator_service_workflow(local_consolidator_service, spanner
     """
     batch_id, gcs_paths = gcs_setup_for_local_test
 
+    instance_id = os.environ.get("GAE_INSTANCE", "local-test-instance") # Use a default for local testing
+
     # Directly call the service's process_message method
-    local_consolidator_service.process_message(batch_id, gcs_paths, "dummy-topic-path", instance_id)
+    local_consolidator_service.process_message(batch_id, gcs_paths, "dummy-topic-path", instance_id, local_consolidator_service.invocation_id)
 
     # Wait for consolidation and persistence to complete (poll Spanner)
     max_retries = 20 
