@@ -23,6 +23,7 @@ from spanner_operations import SpannerOperations
 from consolidator_service import ConsolidatorService # New import
 
 import uuid
+from google.cloud.logging.handlers import CloudLoggingHandler
 
 class InvocationIdFilter(logging.Filter):
     def __init__(self, invocation_id: str):
@@ -35,18 +36,25 @@ class InvocationIdFilter(logging.Filter):
 
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
-logging_client.setup_logging()
-
-# Configure basic logging with a format that includes invocation_id
-logging.basicConfig(level=logging.DEBUG, format='%(levelname)s:%(name)s:%(invocation_id)s:%(message)s')
 
 @functions_framework.cloud_event
 def consolidator(cloud_event):
     invocation_id = str(uuid.uuid4())
-    # Add the custom filter to the root logger
-    logging.getLogger().addFilter(InvocationIdFilter(invocation_id))
+    
+    # Create a Cloud Logging handler
+    handler = CloudLoggingHandler(logging_client)
+    
+    # Create a formatter that includes the invocation_id
+    formatter = logging.Formatter('%(levelname)s:%(name)s:%(invocation_id)s:%(message)s')
+    handler.setFormatter(formatter)
+    
+    # Add the handler and filter to the root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.addHandler(handler)
+    root_logger.addFilter(InvocationIdFilter(invocation_id))
+
     logging.info(f"Consolidator function started. Invocation ID: {invocation_id}")
-    logging.info("--- START OF CONSOLIDATOR INVOCATION ---")
     logging.info(f"GRAPH_DATA_BUCKET_NAME from env: {os.environ.get('GRAPH_DATA_BUCKET_NAME')}")
     batch_id = None
     try:
