@@ -14,16 +14,17 @@ from spanner_operations import SpannerOperations
 class ConsolidatorService:
     def __init__(self, llm_ops: LLMOperations, graph_processor: GraphProcessor, 
                  spanner_ops: SpannerOperations, publisher: pubsub_v1.PublisherClient, 
-                 storage_client: storage.Client):
+                 storage_client: storage.Client, invocation_id: str):
         self.llm_ops = llm_ops
         self.graph_processor = graph_processor
         self.spanner_ops = spanner_ops
         self.publisher = publisher
         self.storage_client = storage_client
-        logging.info("ConsolidatorService initialized.")
+        self.invocation_id = invocation_id
+        logging.info(f"ConsolidatorService initialized with Invocation ID: {self.invocation_id}.")
 
-    def process_message(self, batch_id: str, gcs_paths: list, persistor_topic_path: str, instance_id: str):
-        logging.info(f"Processing message for batch_id: {batch_id}")
+    def process_message(self, batch_id: str, gcs_paths: list, persistor_topic_path: str, instance_id: str, invocation_id: str):
+        logging.info(f"Processing message for batch_id: {batch_id}. Invocation ID: {invocation_id}")
 
         if not gcs_paths:
             logging.error(f"No GCS paths found in Pub/Sub message for batch {batch_id}. Stopping execution.")

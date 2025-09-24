@@ -22,14 +22,30 @@ from graph_processing import GraphProcessor
 from spanner_operations import SpannerOperations
 from consolidator_service import ConsolidatorService # New import
 
+import uuid
+
+class InvocationIdFilter(logging.Filter):
+    def __init__(self, invocation_id: str):
+        super().__init__()
+        self.invocation_id = invocation_id
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.invocation_id = self.invocation_id
+        return True
+
 # --- Boilerplate and Configuration ---
 logging_client = google.cloud.logging.Client()
 logging_client.setup_logging()
-logging.basicConfig(level=logging.DEBUG)
+
+# Configure basic logging with a format that includes invocation_id
+logging.basicConfig(level=logging.DEBUG, format='%(levelname)s:%(name)s:%(invocation_id)s:%(message)s')
 
 @functions_framework.cloud_event
 def consolidator(cloud_event):
-    logging.info("Consolidator function started.")
+    invocation_id = str(uuid.uuid4())
+    # Add the custom filter to the root logger
+    logging.getLogger().addFilter(InvocationIdFilter(invocation_id))
+    logging.info(f"Consolidator function started. Invocation ID: {invocation_id}")
     logging.info("--- START OF CONSOLIDATOR INVOCATION ---")
     logging.info(f"GRAPH_DATA_BUCKET_NAME from env: {os.environ.get('GRAPH_DATA_BUCKET_NAME')}")
     batch_id = None
@@ -46,7 +62,7 @@ def consolidator(cloud_event):
         spanner_ops = SpannerOperations(spanner_client, os.environ.get("SPANNER_INSTANCE_ID"), os.environ.get("SPANNER_DATABASE_ID"))
         
         # Initialize ConsolidatorService
-        consolidator_service = ConsolidatorService(llm_ops, graph_processor, spanner_ops, publisher, storage_client)
+        consolidator_service = ConsolidatorService(llm_ops, graph_processor, spanner_ops, publisher, storage_client, invocation_id)
 
         cpu_usage = psutil.cpu_percent(interval=1)
         memory_info = psutil.virtual_memory()
@@ -59,7 +75,7 @@ def consolidator(cloud_event):
 
         persistor_topic_name = os.environ.get("PERSISTOR_TOPIC_NAME")
         if not persistor_topic_name:
-            logging.error("PERSISTOR_TOPIC_NAME environment variable not set.")
+            logging.error(f"PERSISTOR_TOPIC_NAME environment variable not set. Invocation ID: {invocation_id}")
             if batch_id:
                 spanner_ops.release_lock(batch_id, "FAILED")
             return None
@@ -69,11 +85,11 @@ def consolidator(cloud_event):
         instance_id = os.environ.get("GAE_INSTANCE")
 
         # Call the service to process the message
-        consolidator_service.process_message(batch_id, gcs_paths, topic_path, instance_id)
+        consolidator_service.process_message(batch_id, gcs_paths, topic_path, instance_id, invocation_id)
 
     except Exception as e:
         batch_id = batch_id or (data and data.get("batch_id"))
-        logging.error(f'An error occurred in the consolidator for batch_id {batch_id}: {e}', exc_info=True)
+        logging.error(f'An error occurred in the consolidator for batch_id {batch_id}. Invocation ID: {invocation_id}: {e}', exc_info=True)
         return None
     finally:
-        logging.info("--- END OF CONSOLIDATOR INVOCATION ---")
+        logging.info(f"--- END OF CONSOLIDATOR INVOCATION. Invocation ID: {invocation_id} ---")
