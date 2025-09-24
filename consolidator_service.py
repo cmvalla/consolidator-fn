@@ -54,6 +54,7 @@ class ConsolidatorService:
                 return None
 
             merged_graph = ig.union(graphs_to_merge, byname=True)
+            logging.info(f"Summary Phase 2: Merged {len(graphs_to_merge)} graphs. Resulting graph has {merged_graph.vcount()} vertices and {merged_graph.ecount()} edges.")
             
             if not merged_graph.vcount():
                 logging.info(f"No graph data found after merging for batch {batch_id}. Stopping execution.")
@@ -70,6 +71,7 @@ class ConsolidatorService:
             clustered_graph_dict = _graph_to_dict(clustered_graph)
             
             deduplicated_graph_dict = self.graph_processor.deduplicate_entities(clustered_graph_dict)
+            logging.info(f"Summary Phase 3: Clustered graph had {clustered_graph.vcount()} entities. Deduplicated graph has {len(deduplicated_graph_dict.get("entities", []))} entities.")
             
             # Convert back to igraph.Graph for community detection
             deduplicated_graph = _dict_to_graph(deduplicated_graph_dict)
@@ -77,10 +79,13 @@ class ConsolidatorService:
             # Macro Phase 4: Community Detection
             logging.info(f"Macro Phase 4: Running community detection for batch {batch_id}.")
             community_graph = self.graph_processor.run_igraph_community_detection(deduplicated_graph)
+            logging.info(f"Summary Phase 4: Community detection found {community_graph.vcount()} communities.")
             
             # Macro Phase 5: Removing Null Entities/Relationships
             logging.info(f"Macro Phase 5: Removing entities with null keys and relationships for batch {batch_id}.")
             final_graph = self.graph_processor.remove_entities_with_null_keys_and_relationships(community_graph)
+            if final_graph:
+                logging.info(f"Summary Phase 5: Final graph has {final_graph.vcount()} entities and {final_graph.ecount()} relationships after removing nulls.")
             
             if final_graph:
                 # Macro Phase 6: Serializing and Uploading to GCS
