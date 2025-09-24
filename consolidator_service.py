@@ -86,7 +86,7 @@ class ConsolidatorService:
             clustered_graph_dict = _graph_to_dict(clustered_graph)
             
             deduplicated_graph_dict = self.graph_processor.deduplicate_entities(clustered_graph_dict)
-            logging.info(f"Summary Phase 3: Clustered graph had {clustered_graph.vcount()} entities. Deduplicated graph has {len(deduplicated_graph_dict.get("entities", []))} entities.")
+            logging.info(f"Summary Phase 3: Clustered graph had {clustered_graph.vcount()} entities. Deduplicated graph has {len(deduplicated_graph_dict.get('entities', []))} entities.")
             
             # Convert back to igraph.Graph for community detection
             deduplicated_graph = _dict_to_graph(deduplicated_graph_dict)
