@@ -31,11 +31,14 @@ class ConsolidatorService:
                 self.spanner_ops.release_lock(batch_id, "FAILED")
             return None
 
-        # Attempt to acquire a lock for the current batch in Spanner.
+        # Macro Phase 1: Acquiring Lock
+        logging.info(f"Macro Phase 1: Acquiring lock for batch {batch_id}.")
         if not self.spanner_ops.acquire_lock(batch_id, instance_id):
             return None
 
         try:
+            # Macro Phase 2: Downloading and Merging Graphs
+            logging.info(f"Macro Phase 2: Downloading and merging graphs for batch {batch_id}.")
             graphs_to_merge = []
             for path in gcs_paths:
                 bucket_name, blob_name = path.replace("gs://", "").split("/", 1)
@@ -58,6 +61,9 @@ class ConsolidatorService:
                 return None
 
             embedded_graph = merged_graph            
+            
+            # Macro Phase 3: Clustering and Deduplication
+            logging.info(f"Macro Phase 3: Clustering and deduplicating entities for batch {batch_id}.")
             clustered_graph = self.graph_processor.cluster_and_merge_entities(embedded_graph)
             
             # Convert igraph.Graph to dictionary format for deduplication
@@ -68,10 +74,17 @@ class ConsolidatorService:
             # Convert back to igraph.Graph for community detection
             deduplicated_graph = _dict_to_graph(deduplicated_graph_dict)
             
+            # Macro Phase 4: Community Detection
+            logging.info(f"Macro Phase 4: Running community detection for batch {batch_id}.")
             community_graph = self.graph_processor.run_igraph_community_detection(deduplicated_graph)
+            
+            # Macro Phase 5: Removing Null Entities/Relationships
+            logging.info(f"Macro Phase 5: Removing entities with null keys and relationships for batch {batch_id}.")
             final_graph = self.graph_processor.remove_entities_with_null_keys_and_relationships(community_graph)
             
             if final_graph:
+                # Macro Phase 6: Serializing and Uploading to GCS
+                logging.info(f"Macro Phase 6: Serializing and uploading graph to GCS for batch {batch_id}.")
                 try:
                     serialized_graph = pickle.dumps(final_graph)
                     
@@ -91,6 +104,8 @@ class ConsolidatorService:
                     gcs_path = f"gs://{gcs_bucket_name}/{object_name}"
                     logging.info(f"Uploaded serialized graph to GCS: {gcs_path}")
 
+                    # Macro Phase 7: Publishing to Persistor Topic
+                    logging.info(f"Macro Phase 7: Publishing message to persistor topic for batch {batch_id}.")
                     message_payload = {
                         "batch_id": batch_id,
                         "gcs_path": gcs_path
@@ -108,6 +123,8 @@ class ConsolidatorService:
                 self.spanner_ops.release_lock(batch_id, "FAILED")
                 return None
 
+            # Macro Phase 8: Releasing Lock
+            logging.info(f"Macro Phase 8: Releasing lock for batch {batch_id} with status PENDING_PERSISTENCE.")
             self.spanner_ops.release_lock(batch_id, "PENDING_PERSISTENCE")
 
         except Exception as e:
