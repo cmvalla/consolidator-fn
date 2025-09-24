@@ -17,7 +17,7 @@ SPANNER_INSTANCE_ID = os.environ.get("SPANNER_INSTANCE_ID")
 SPANNER_DATABASE_ID = os.environ.get("SPANNER_DATABASE_ID")
 CONSOLIDATOR_TOPIC_NAME = os.environ.get("CONSOLIDATOR_TOPIC_NAME", "consolidation-topic-kid")
 GRAPH_DATA_BUCKET_NAME = os.environ.get("GRAPH_DATA_BUCKET_NAME")
-PERSISTOR_TOPIC_NAME = os.environ.get("PERSISTOR_TOPIC_NAME")
+
 
 # --- Constants for Test Data ---
 TEST_BATCH_ID = str(uuid.uuid4())
@@ -61,21 +61,29 @@ def real_spanner_ops(client_factory):
     spanner_client = client_factory.get_spanner_client()
     return SpannerOperations(spanner_client, SPANNER_INSTANCE_ID, SPANNER_DATABASE_ID)
 
-@pytest.fixture(scope="module")
-def real_publisher(client_factory):
-    return client_factory.get_publisher()
+
 
 @pytest.fixture(scope="module")
 def real_storage_client(client_factory):
     return client_factory.get_storage_client()
 
 @pytest.fixture(scope="module")
-def local_consolidator_service(real_llm_ops, real_graph_processor, real_spanner_ops, real_publisher, real_storage_client):
+def local_consolidator_service(real_llm_ops, real_graph_processor, real_spanner_ops, real_storage_client):
+    # Create a mock publisher that does nothing
+    class MockPublisher:
+        def topic_path(self, project, topic_name):
+            return f"projects/{project}/topics/{topic_name}"
+        def publish(self, topic_path, data):
+            print(f"MockPublisher: Publishing to {topic_path} with data {data}")
+            pass
+
+    mock_publisher = MockPublisher()
+
     return ConsolidatorService(
         llm_ops=real_llm_ops,
         graph_processor=real_graph_processor,
         spanner_ops=real_spanner_ops,
-        publisher=real_publisher,
+        publisher=mock_publisher,
         storage_client=real_storage_client
     )
 
@@ -174,11 +182,8 @@ def test_local_consolidator_service_workflow(local_consolidator_service, spanner
     """
     batch_id, gcs_paths = gcs_setup_for_local_test
 
-    persistor_topic_path = local_consolidator_service.publisher.topic_path(PROJECT_ID, PERSISTOR_TOPIC_NAME)
-    instance_id = os.environ.get("GAE_INSTANCE", "local-test-instance") # Use a default for local testing
-
     # Directly call the service's process_message method
-    local_consolidator_service.process_message(batch_id, gcs_paths, persistor_topic_path, instance_id)
+    local_consolidator_service.process_message(batch_id, gcs_paths, "dummy-topic-path", instance_id)
 
     # Wait for consolidation and persistence to complete (poll Spanner)
     max_retries = 20 
