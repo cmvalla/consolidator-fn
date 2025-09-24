@@ -35,23 +35,26 @@ class InvocationIdFilter(logging.Filter):
         return True
 
 # --- Boilerplate and Configuration ---
-logging_client = google.cloud.logging.Client()
+
 
 @functions_framework.cloud_event
 def consolidator(cloud_event):
     invocation_id = str(uuid.uuid4())
     
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
     # Create a Cloud Logging handler
-    handler = CloudLoggingHandler(logging_client)
+    cloud_handler = CloudLoggingHandler(google.cloud.logging.Client())
     
     # Create a formatter that includes the invocation_id
     formatter = logging.Formatter('%(levelname)s:%(name)s:%(invocation_id)s:%(message)s')
-    handler.setFormatter(formatter)
+    cloud_handler.setFormatter(formatter)
     
     # Add the handler and filter to the root logger
-    root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
-    root_logger.addHandler(handler)
+    root_logger.addHandler(cloud_handler)
     root_logger.addFilter(InvocationIdFilter(invocation_id))
 
     logging.info(f"Consolidator function started. Invocation ID: {invocation_id}")
