@@ -4,14 +4,16 @@ import requests
 import time
 import json
 import re
-from typing import List
+from typing import List, Dict, Any, Optional
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import Config
 import google.auth
 import google.auth.transport.requests
 import google.oauth2.id_token
+import uuid
 
 CLASS_SCHEMA = {
     "type": "object",
@@ -50,7 +52,7 @@ class LLMOperations:
         self.summarization_chain = SUMMARY_PROMPT | self.llm
         self.class_property_chain = LLMChain(llm=self.llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
 
-    def _get_single_embedding(self, text: str, entity_id: str = "Unknown"):
+    def _get_single_embedding(self, text: str, entity_id: str = "Unknown") -> Dict[str, List[float]]:
         """Generates embeddings for a given text by calling the graphrag-embedding service."""
         embedding_service_url = Config.EMBEDDING_SERVICE_URL
         if not embedding_service_url:
@@ -112,83 +114,27 @@ class LLMOperations:
         logging.error(f"Failed to get embeddings for entity {entity_id} after {MAX_RETRIES} retries.")
         return {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
 
-    def get_embeddings(self, texts: List[str]):
-        """Generates embeddings for a list of texts by calling the graphrag-embedding service."""
-        embedding_service_url = Config.EMBEDDING_SERVICE_URL
-        if not embedding_service_url:
-            logging.error("EMBEDDING_SERVICE_URL environment variable not set.")
-            return [[0.0] * Config.EMBEDDING_DIMENSION] * len(texts) # Return list of zero embeddings
+    def get_embeddings(self, texts: List[str], ids: List[str]) -> Dict[str, Dict[str, List[float]]]:
+        """Generates embeddings for a list of texts in parallel using a thread pool."""
+        if not texts:
+            return {}
 
-        MAX_RETRIES = 10
-        INITIAL_BACKOFF_SECONDS = 1
-        MAX_BACKOFF_SECONDS = 600  # 10 minutes
-        
-        retries = 0
-        backoff_seconds = INITIAL_BACKOFF_SECONDS
-
-        while retries < MAX_RETRIES:
-            try:
-                # Explicitly get an ID token for the Cloud Run service
-                auth_req = google.auth.transport.requests.Request()
-                id_token_raw = google.oauth2.id_token.fetch_id_token(auth_req, embedding_service_url)
-                id_token = id_token_raw if id_token_raw is not None else ""
-
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {id_token}"
-                }
-                
-                payload = {"texts": texts, "embedding_source": "gemini", "embedding_types": ["clustering", "semantic_search"], "invocation_id": uuid.uuid4().hex} # Use 'texts' key for batch
-                logging.info(f"Sending batch embedding request: url={embedding_service_url}, payload_size={len(texts)}")
-                response = requests.post(embedding_service_url, headers=headers, data=json.dumps(payload))
-                logging.info(f"Received raw batch embedding response (Status: {response.status_code}): {response.text}")
-                
-                if response.status_code == 200:
-                    response_data = response.json().get("embeddings", {})
-                    
-                    # Initialize a list to hold the processed embeddings for each text
-                    processed_embeddings = []
-                    
-                    # Iterate through the texts to match them with their respective embeddings
-                    for i in range(len(texts)):
-                        single_text_embeddings = {}
-                        # Assuming the response_data contains keys like "clustering" and "semantic_search"
-                        # and each contains a list of embeddings corresponding to the input texts order
-                        
-                        if "clustering" in response_data and i < len(response_data["clustering"]):
-                            single_text_embeddings["clustering"] = response_data["clustering"][i]
-                        else:
-                            single_text_embeddings["clustering"] = [0.0] * Config.EMBEDDING_DIMENSION
-                        
-                        if "semantic_search" in response_data and i < len(response_data["semantic_search"]):
-                            single_text_embeddings["semantic_search"] = response_data["semantic_search"][i]
-                        else:
-                            single_text_embeddings["semantic_search"] = [0.0] * Config.EMBEDDING_DIMENSION
-                        
-                        processed_embeddings.append(single_text_embeddings)
-
-                    logging.info(f"Successfully received and processed {len(processed_embeddings)} embeddings.")
-                    return processed_embeddings
-                elif response.status_code >= 500:
-                    logging.warning(f"Embedding service returned a server error ({response.status_code}). Retrying in {backoff_seconds} seconds...\nFull response: {response.text}")
-                    time.sleep(backoff_seconds)
-                    retries += 1
-                    backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
-                else: # Handle other client errors or invalid responses
-                    logging.error(f"Embedding service returned an unexpected status code ({response.status_code}): {response.text}")
-                    response.raise_for_status() # Raise an exception for non-2xx status codes
-                    # Only one return statement is needed here
-                    return [{"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}] * len(texts)
-
-            except requests.exceptions.RequestException as e:
-                logging.error(f"Error calling embedding service: {e}")
-                time.sleep(backoff_seconds)
-                retries += 1
-                backoff_seconds = min(backoff_seconds * 2, MAX_BACKOFF_SECONDS)
-
-        logging.error(f"Failed to get embeddings after {MAX_RETRIES} retries.")
-        return [{"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}] * len(texts)
-
+        # Use a ThreadPoolExecutor to parallelize embedding generation
+        with ThreadPoolExecutor(max_workers=Config.MAX_WORKERS) as executor:
+            # Map each future to its entity ID
+            future_to_id = {executor.submit(self._get_single_embedding, text, eid): eid for text, eid in zip(texts, ids)}
+            
+            results = {}
+            for future in as_completed(future_to_id):
+                eid = future_to_id[future]
+                try:
+                    embedding_result = future.result()
+                    results[eid] = embedding_result
+                except Exception as exc:
+                    logging.error(f'Error generating embedding for entity {eid}: {exc}')
+                    # Assign default zero embeddings on error
+                    results[eid] = {"clustering": [0.0] * Config.EMBEDDING_DIMENSION, "semantic_search": [0.0] * Config.EMBEDDING_DIMENSION}
+        return results
 
 
     def generate_class_properties(self, batched_clusters_data, schema):

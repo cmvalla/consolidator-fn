@@ -219,6 +219,8 @@ class GraphProcessor:
                 logging.info(f"Class property generation progress: {progress:.0f}% ({processed_clusters}/{total_clusters})")
 
         # Iterate through the generated properties and create or merge 'Class' entities.
+        summaries_to_embed = []
+        class_eids_to_embed = []
         for idx, generated_properties in enumerate(all_generated_properties):
             cluster_info = cluster_info_list[idx]
             cluster_member_ids = cluster_info["member_ids"]
@@ -246,14 +248,12 @@ class GraphProcessor:
                     # If it's a new class, create a new 'Class' entity.
                     # Generate a summary for the class using an LLM.
                     summary = self.llm_ops.summarization_chain.invoke({"text_chunk": cluster_info["cluster_text"]}).content
-                    # Generate embeddings for the new class entity.
-                    all_embeddings = self.llm_ops._get_single_embedding(summary, class_eid)
+                    summaries_to_embed.append(summary)
+                    class_eids_to_embed.append(class_eid)
                     class_entity = {
                         "id": class_eid,
                         "type": "Class",
                         "properties": generated_properties,
-                        "clustering_embedding": all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION),
-                        "retrieval_document_embedding": all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
                     }
                     name_to_class_entity[class_name] = class_entity
                     for member_id in cluster_member_ids:
@@ -262,6 +262,13 @@ class GraphProcessor:
 
             except Exception as e:
                 logging.error(f"Failed to process generated properties for cluster {cluster_info}: {e}", exc_info=True)
+
+        all_embeddings = self.llm_ops.get_embeddings(summaries_to_embed, class_eids_to_embed)
+        for class_name, class_entity in name_to_class_entity.items():
+            class_eid = class_entity["id"]
+            embeddings = all_embeddings.get(class_eid, {})
+            class_entity["clustering_embedding"] = embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
+            class_entity["retrieval_document_embedding"] = embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
 
         # Collect all entities for the new graph: existing entities not clustered, and new class entities
         new_entities = []
