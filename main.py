@@ -23,19 +23,8 @@ from spanner_operations import SpannerOperations
 from consolidator_service import ConsolidatorService # New import
 
 import uuid
-from google.cloud.logging.handlers import CloudLoggingHandler
 
 # --- Boilerplate and Configuration ---
-
-# Custom filter to add invocation_id to all log records.
-class InvocationIdFilter(logging.Filter):
-    def __init__(self, invocation_id):
-        super().__init__()
-        self.invocation_id = invocation_id
-
-    def filter(self, record):
-        record.invocation_id = self.invocation_id
-        return True
 
 @functions_framework.cloud_event
 def consolidator(cloud_event):
@@ -44,21 +33,7 @@ def consolidator(cloud_event):
     
     # Configure logging to use Cloud Logging
     client = google.cloud.logging.Client()
-    handler = CloudLoggingHandler(client)
-
-    # Create a formatter and add it to the handler
-    formatter = logging.Formatter('%(levelname)s: [%(invocation_id)s] %(message)s')
-    handler.setFormatter(formatter)
-
-    # Add the filter to the handler
-    handler.addFilter(InvocationIdFilter(invocation_id))
-
-    # Remove existing handlers and add the new one
-    root_logger = logging.getLogger()
-    for h in root_logger.handlers[:]:
-        root_logger.removeHandler(h)
-    root_logger.addHandler(handler)
-    root_logger.setLevel(logging.DEBUG)
+    client.setup_logging()
 
     logging.info(f"Consolidator function started. Invocation ID: {invocation_id}")
     logging.info(f"GRAPH_DATA_BUCKET_NAME from env: {os.environ.get('GRAPH_DATA_BUCKET_NAME')}")
@@ -99,7 +74,7 @@ def consolidator(cloud_event):
         instance_id = os.environ.get("GAE_INSTANCE")
 
         # Call the service to process the message
-        consolidator_service.process_message(batch_id, gcs_paths, topic_path, instance_id, invocation_id)
+        consolidator_service.process_message(batch_id, gcs_paths, topic_path, instance_id)
 
     except Exception as e:
         batch_id = batch_id or (data and data.get("batch_id"))
