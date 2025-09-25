@@ -41,7 +41,7 @@ def consolidator(cloud_event):
     for h in root_logger.handlers[:]:
         root_logger.removeHandler(h)
     root_logger.addHandler(handler)
-    root_logger.setLevel(logging.INFO) # Set default level to INFO
+    root_logger.setLevel(logging.DEBUG) # Set default level to INFO
 
     logging.info(f"Consolidator function started. Invocation ID: {invocation_id}", extra={'invocation_id': invocation_id})
     logging.info(f"GRAPH_DATA_BUCKET_NAME from env: {os.environ.get('GRAPH_DATA_BUCKET_NAME')}", extra={'invocation_id': invocation_id})
