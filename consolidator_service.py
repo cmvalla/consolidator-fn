@@ -93,7 +93,7 @@ class ConsolidatorService:
             
             deduplicated_graph_dict = self.graph_processor.deduplicate_entities(clustered_graph_dict)
             end_time_phase3 = datetime.datetime.now()
-            logging.info(f"Macro Phase 3: Clustered graph had {clustered_graph.vcount()} entities. Deduplicated graph has {len(deduplicated_graph_dict.get("entities", []))} entities. End Time: {end_time_phase3}. Duration: {end_time_phase3 - start_time_phase3}.")
+            logging.info(f"Macro Phase 3: Clustered graph had {clustered_graph.vcount()} entities. Deduplicated graph has {len(deduplicated_graph_dict.get(\"entities\", []))} entities. End Time: {end_time_phase3}. Duration: {end_time_phase3 - start_time_phase3}.")
             
             # Convert back to igraph.Graph for community detection
             deduplicated_graph = _dict_to_graph(deduplicated_graph_dict)
