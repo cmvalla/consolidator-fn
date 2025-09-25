@@ -45,6 +45,8 @@ class GraphProcessor:
             
             # Extract 'properties' and parse it from JSON string to dict
             properties_json_str = all_attributes.get("properties", "{}")
+            if properties_json_str is None:
+                properties_json_str = "{}"
             try:
                 parsed_properties = json.loads(properties_json_str)
             except json.JSONDecodeError:
