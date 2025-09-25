@@ -58,9 +58,9 @@ class ConsolidatorService:
                 num_clustering_embeddings_worker = 0
                 num_semantic_embeddings_worker = 0
                 for vertex in worker_graph.vs:
-                    if "cluster_embedding" in vertex.attributes() and any(e != 0.0 for e in vertex["cluster_embedding"]):
+                    if "cluster_embedding" in vertex.attributes() and vertex["cluster_embedding"] is not None and any(e != 0.0 for e in vertex["cluster_embedding"]):
                         num_clustering_embeddings_worker += 1
-                    if "embedding" in vertex.attributes() and any(e != 0.0 for e in vertex["embedding"]):
+                    if "embedding" in vertex.attributes() and vertex["embedding"] is not None and any(e != 0.0 for e in vertex["embedding"]):
                         num_semantic_embeddings_worker += 1
                 
                 logging.info(f"Deserialized graph from {path}: Entities={num_entities_worker}, Relationships={num_relationships_worker}, ClusteringEmbeddings={num_clustering_embeddings_worker}, SemanticEmbeddings={num_semantic_embeddings_worker}.")
