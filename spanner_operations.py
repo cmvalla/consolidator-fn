@@ -42,8 +42,8 @@ class SpannerOperations:
                 status, lock_owner, lock_timestamp = row
                 
                 logging.info(f"Current status for batch {batch_id}: status={status}, lock_owner={lock_owner}, lock_timestamp={lock_timestamp}")
-                if status == "COMPLETED":
-                    logging.info(f"Batch {batch_id} has already been processed.")
+                if status == "COMPLETED" or status == "PENDING_PERSISTENCE":
+                    logging.info(f"Batch {batch_id} has already been processed or is pending persistence.")
                     return False
 
                 if status == "PENDING_CONSOLIDATION":
@@ -56,6 +56,9 @@ class SpannerOperations:
                     return True
 
                 if status == "PROCESSING":
+                    if lock_owner == instance_id:
+                        logging.info(f"Instance {instance_id} already owns the lock for batch {batch_id}. Continuing.")
+                        return True
                     # Check for lock expiration
                     # This is a simplified example, you might want to use a more robust time comparison
                     if lock_timestamp and (datetime.now(timezone.utc) - lock_timestamp).total_seconds() > 300:
