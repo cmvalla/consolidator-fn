@@ -48,6 +48,7 @@ class LLMOperations:
     def __init__(self, llm):
         self.llm = llm
         self.summarization_chain = SUMMARY_PROMPT | self.llm
+        self.class_property_chain = LLMChain(llm=self.llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
 
     def _get_single_embedding(self, text: str, entity_id: str = "Unknown"):
         """Generates embeddings for a given text by calling the graphrag-embedding service."""
