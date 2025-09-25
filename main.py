@@ -30,6 +30,7 @@ import uuid
 def consolidator(cloud_event):
     invocation_id = str(uuid.uuid4())
     data = None # Initialize data to None
+    batch_id = None # Initialize batch_id to None
     
     # Configure logging to use Cloud Logging
     client = google.cloud.logging.Client()
