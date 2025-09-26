@@ -387,12 +387,14 @@ class GraphProcessor:
 
                 for loser in losers:
                     eids_to_remap[loser["id"]] = winner["id"]
+                    winner["properties"].get("communities", []).extend(loser["properties"].get("communities", []))
                     logging.info(f"Merging class '{loser['id']}' into '{winner['id']}'.")
 
             # Handle duplicate 'Instance' entities by renaming them with a unique suffix.
             elif all(e.get("type") == "Instance" for e in group):
                 logging.info(f"Handling duplicate Instance EID: {eid}")
-                final_entities[eid] = group[0]
+                winner = group[0]
+                final_entities[eid] = winner
                 for i, duplicate in enumerate(group[1:]):
                     original_id = duplicate["id"]
                     while True:
@@ -403,11 +405,7 @@ class GraphProcessor:
                     eids_to_remap[original_id] = new_eid
                     duplicate["id"] = new_eid
                     final_entities[new_eid] = duplicate
-                    # Update the original entity in the entities list
-                    for entity in entities:
-                        if entity["id"] == original_id:
-                            entity["id"] = new_eid
-                            break
+                    winner["properties"].get("communities", []).extend(duplicate["properties"].get("communities", []))
                     logging.info(f"Renamed duplicate instance '{original_id}' to '{new_eid}'.")
             # Handle other unhandled duplicate EID cases by renaming them.
             else:
@@ -426,11 +424,7 @@ class GraphProcessor:
                         eids_to_remap[original_id] = new_eid
                         duplicate["id"] = new_eid
                         final_entities[new_eid] = duplicate
-                        # Update the original entity in the entities list
-                        for entity in entities:
-                            if entity["id"] == original_id:
-                                entity["id"] = new_eid
-                                break
+                        winner["properties"].get("communities", []).extend(duplicate["properties"].get("communities", []))
                         logging.info(f"Renamed duplicate entity '{original_id}' of type '{duplicate.get('type')}' to '{new_eid}'.")
 
         # Remap relationships to reflect the changes in EIDs due to deduplication.
