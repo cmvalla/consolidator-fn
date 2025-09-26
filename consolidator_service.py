@@ -119,8 +119,7 @@ class ConsolidatorService:
                 start_time_phase6 = datetime.datetime.now()
                 logging.info(f"Macro Phase 6: Serializing and uploading graph to GCS for batch {batch_id}. Start Time: {start_time_phase6}.")
                 try:
-                    final_graph_dict = _graph_to_dict(final_graph)
-                    serialized_graph = pickle.dumps(final_graph_dict)
+                    serialized_graph = pickle.dumps(final_graph)
                     
                     gcs_bucket_name = os.environ.get("GRAPH_DATA_BUCKET_NAME")
                     if not gcs_bucket_name:
