@@ -455,6 +455,7 @@ class GraphProcessor:
                 logging.warning(f"Skipping malformed relationship: {rel}. Missing 'source' or 'target' or not a dictionary.")
 
         data["entities"] = list(final_entities.values())
+        data["relationships"] = relationships
         logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities.")
         return data
 
