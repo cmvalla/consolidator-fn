@@ -291,15 +291,25 @@ class GraphProcessor:
             if "retrieval_document_embedding" in entity:
                 new_graph.vs[i]["retrieval_document_embedding"] = entity["retrieval_document_embedding"]
 
+        # Remap relationships to the new class entities
+        for rel in relationships:
+            if rel["source"] in class_id_map:
+                rel["source"] = class_id_map[rel["source"]]
+            if rel["target"] in class_id_map:
+                rel["target"] = class_id_map[rel["target"]]
+
         # Add relationships to the new graph
         for rel in relationships:
-            source_vertex = new_graph.vs.find(name=rel["source"])
-            target_vertex = new_graph.vs.find(name=rel["target"])
-            if source_vertex and target_vertex:
-                edge = new_graph.add_edge(source_vertex, target_vertex)
-                edge["type"] = rel["type"]
-                for k, v in rel["properties"].items():
-                    edge[k] = v
+            try:
+                source_vertex = new_graph.vs.find(name=rel["source"])
+                target_vertex = new_graph.vs.find(name=rel["target"])
+                if source_vertex and target_vertex:
+                    edge = new_graph.add_edge(source_vertex, target_vertex)
+                    edge["type"] = rel["type"]
+                    for k, v in rel["properties"].items():
+                        edge[k] = v
+            except ValueError:
+                logging.warning(f"Skipping relationship due to missing source or target vertex: {rel}")
 
         # Update existing entities: change their type to 'Instance' if they are not 'Chunk' or 'Community'.
         # This reflects their new role as instances of the newly created 'Class' entities.
