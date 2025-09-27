@@ -284,6 +284,8 @@ class GraphProcessor:
         for i, entity in enumerate(new_entities):
             for k, v in entity["properties"].items():
                 new_graph.vs[i][k] = v
+            if "embedding" in entity:
+                new_graph.vs[i]["embedding"] = entity["embedding"]
             if "clustering_embedding" in entity:
                 new_graph.vs[i]["clustering_embedding"] = entity["clustering_embedding"]
             if "retrieval_document_embedding" in entity:
