@@ -165,6 +165,24 @@ class ConsolidatorService:
             end_time_phase8 = datetime.datetime.now()
             logging.info(f"Macro Phase 8: Lock released for batch {batch_id}. End Time: {end_time_phase8}. Duration: {end_time_phase8 - start_time_phase8}.")
 
+            # Final Summary Log
+            num_entities = final_graph.vcount()
+            num_relationships = final_graph.ecount()
+            num_clustering_embeddings = 0
+            num_semantic_embeddings = 0
+            for vertex in final_graph.vs:
+                if "cluster_embedding" in vertex.attributes() and vertex["cluster_embedding"] is not None and any(e != 0.0 for e in vertex["cluster_embedding"]):
+                    num_clustering_embeddings += 1
+                if "embedding" in vertex.attributes() and vertex["embedding"] is not None and any(e != 0.0 for e in vertex["embedding"]):
+                    num_semantic_embeddings += 1
+            
+            logging.info(f"--- FINAL CONSOLIDATOR SUMMARY FOR BATCH {batch_id} ---")
+            logging.info(f"Total Entities: {num_entities}")
+            logging.info(f"Total Relationships: {num_relationships}")
+            logging.info(f"Entities with Clustering Embedding: {num_clustering_embeddings}/{num_entities}")
+            logging.info(f"Entities with Semantic Embedding: {num_semantic_embeddings}/{num_entities}")
+            logging.info(f"-----------------------------------------------------")
+
         except Exception as e:
             logging.error(f'An error occurred while processing batch {batch_id}: {e}.', exc_info=True)
             self.spanner_ops.release_lock(batch_id, "FAILED")
