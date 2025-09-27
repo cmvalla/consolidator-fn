@@ -526,12 +526,15 @@ class GraphProcessor:
                 continue
 
             # Generate embeddings for the new community entity.
-            all_embeddings = self.llm_ops._get_single_embedding(full_community_summary, comm_id)
+            all_embeddings = self.llm_ops.get_embeddings([full_community_summary], [comm_id])
             if not all_embeddings:
                 logging.warning(f"Skipping Community entity creation for {comm_id} due to missing embeddings.")
                 continue
 
-            semantic_search_embedding = all_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
+            # Get the embeddings for the current community
+            community_embeddings = all_embeddings.get(comm_id, {})
+            semantic_search_embedding = community_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
+            clustering_embedding = community_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
             
             community_entity_properties = {
                 "community_type": "structural",
@@ -543,7 +546,7 @@ class GraphProcessor:
             community_vertex["type"] = "Community"
             for k, v in community_entity_properties.items():
                 community_vertex[k] = v
-            community_vertex["cluster_embedding"] = all_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
+            community_vertex["cluster_embedding"] = clustering_embedding
             community_vertex["embedding"] = semantic_search_embedding
             community_vertex["communities"] = [] # Communities of a community entity are not relevant in this context.
 
