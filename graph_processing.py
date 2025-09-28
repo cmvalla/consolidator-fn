@@ -299,6 +299,8 @@ class GraphProcessor:
             if "retrieval_document_embedding" in entity:
                 new_graph.vs[i]["retrieval_document_embedding"] = entity["retrieval_document_embedding"]
 
+        logging.info(f"new_graph vertex names: {new_graph.vs['name']}")
+
         # Remap relationships to the new class entities
         for rel in relationships:
             if rel["source"] in class_id_map:
