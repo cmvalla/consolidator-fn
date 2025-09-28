@@ -282,6 +282,9 @@ class GraphProcessor:
         new_entities = entities.copy()
         new_entities.extend(name_to_class_entity.values())
 
+        logging.info(f"class_id_map: {json.dumps(class_id_map, indent=2)}")
+        logging.info(f"new_entities IDs: {[e['id'] for e in new_entities]}")
+
         new_graph = ig.Graph(directed=True) # Create a new graph to build the result
         new_graph.add_vertices(len(new_entities))
         new_graph.vs["name"] = [e["id"] for e in new_entities]
