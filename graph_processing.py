@@ -447,6 +447,9 @@ class GraphProcessor:
                         winner["properties"].get("communities", []).extend(duplicate["properties"].get("communities", []))
                         logging.info(f"Renamed duplicate entity '{original_id}' of type '{duplicate.get('type')}' to '{new_eid}'.")
 
+        logging.info(f"EIDs to remap: {eids_to_remap}")
+        logging.info(f"Relationships before remapping: {relationships}")
+
         # Remap relationships to reflect the changes in EIDs due to deduplication.
         for rel in relationships:
             # Ensure rel is a dictionary and has 'source' and 'target' keys before processing
@@ -461,6 +464,8 @@ class GraphProcessor:
                     continue # Skip this malformed relationship
             else:
                 logging.warning(f"Skipping malformed relationship: {rel}. Missing 'source' or 'target' or not a dictionary.")
+
+        logging.info(f"Relationships after remapping: {relationships}")
 
         data["entities"] = list(final_entities.values())
         data["relationships"] = relationships
