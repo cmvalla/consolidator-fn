@@ -27,6 +27,10 @@ class ConsolidatorService:
         logging.info("Processing message in ConsolidatorService. THIS IS A NEW LOG MESSAGE.")
         batch_id = data.get("batch_id")
         gcs_paths = data.get("gcs_paths")
+        instance_id = os.environ.get("GAE_INSTANCE")
+        persistor_topic_name = os.environ.get("PERSISTOR_TOPIC_NAME")
+        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        persistor_topic_path = self.publisher.topic_path(project_id, persistor_topic_name)
 
 
         if not gcs_paths:
