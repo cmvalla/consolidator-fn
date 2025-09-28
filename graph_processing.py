@@ -107,7 +107,9 @@ class GraphProcessor:
             missing_embedding_examples = []
             for i, emb in enumerate(embeddings):
                 if emb is None or len(emb) == 0:
-                    missing_embedding_examples.append(clusterable_entities[i].get('id', 'N/A'))
+                    entity_id = clusterable_entities[i].get('id', 'N/A')
+                    entity_description = clusterable_entities[i].get('properties', {}).get('description', 'No description')
+                    missing_embedding_examples.append(f"ID: {entity_id}, Description: {entity_description}")
                 if len(missing_embedding_examples) >= 5:
                     break
             logging.warning(f"Examples of entities missing embeddings: {missing_embedding_examples}")
@@ -542,42 +544,58 @@ class GraphProcessor:
                         community_summaries[community_id] = []
                     community_summaries[community_id].append(entity_text_for_summary)
 
-        # new_community_entities = []
         # Create new 'Community' entities based on the detected communities.
+        community_creation_data = []
         for comm_id, entity_texts in community_summaries.items():
             entities_description = " ".join(entity_texts)
-
             # Generate summary using LLM
             full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description})['text']
 
             if not full_community_summary:
                 logging.warning(f"Skipping Community entity creation for {comm_id} due to empty summary.")
                 continue
-
-            # Generate embeddings for the new community entity.
-            all_embeddings = self.llm_ops.get_embeddings([full_community_summary], [comm_id])
-            if not all_embeddings:
-                logging.warning(f"Skipping Community entity creation for {comm_id} due to missing embeddings.")
-                continue
-
-            # Get the embeddings for the current community
-            community_embeddings = all_embeddings.get(comm_id, {})
-            semantic_search_embedding = community_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
-            clustering_embedding = community_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
             
-            community_entity_properties = {
-                "community_type": "structural",
-                "Summary": full_community_summary
-            }
-            
-            # Add the new community as a vertex to the graph
-            community_vertex = graph.add_vertex(name=comm_id)
-            community_vertex["type"] = "Community"
-            for k, v in community_entity_properties.items():
-                community_vertex[k] = v
-            community_vertex["cluster_embedding"] = clustering_embedding
-            community_vertex["embedding"] = semantic_search_embedding
-            community_vertex["communities"] = [] # Communities of a community entity are not relevant in this context.
+            community_creation_data.append({
+                "id": comm_id,
+                "summary": full_community_summary,
+                "entity_texts": entity_texts
+            })
+
+        # Batch generate embeddings for all new communities
+        if community_creation_data:
+            community_ids = [c['id'] for c in community_creation_data]
+            community_summaries_for_embedding = [c['summary'] for c in community_creation_data]
+            all_community_embeddings = self.llm_ops.get_embeddings(community_summaries_for_embedding, community_ids)
+
+            if not all_community_embeddings:
+                logging.warning("Failed to get embeddings for any communities.")
+                return graph
+
+            for community_data in community_creation_data:
+                comm_id = community_data['id']
+                full_community_summary = community_data['summary']
+
+                community_embeddings = all_community_embeddings.get(comm_id)
+                if not community_embeddings:
+                    logging.warning(f"Skipping Community entity creation for {comm_id} due to missing embeddings in batched response.")
+                    continue
+
+                semantic_search_embedding = community_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
+                clustering_embedding = community_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
+
+                community_entity_properties = {
+                    "community_type": "structural",
+                    "Summary": full_community_summary
+                }
+
+                # Add the new community as a vertex to the graph
+                community_vertex = graph.add_vertex(name=comm_id)
+                community_vertex["type"] = "Community"
+                for k, v in community_entity_properties.items():
+                    community_vertex[k] = v
+                community_vertex["cluster_embedding"] = clustering_embedding
+                community_vertex["retrieval_document_embedding"] = semantic_search_embedding
+                community_vertex["communities"] = []
 
         logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(community_summaries)} standard Community entities.")
         for v in graph.vs:
