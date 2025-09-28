@@ -75,7 +75,7 @@ def consolidator(cloud_event):
         instance_id = os.environ.get("GAE_INSTANCE")
 
         # Call the service to process the message
-        consolidator_service.process_message(data)
+        consolidator_service.process_message(batch_id, gcs_paths)
 
     except Exception as e:
         batch_id = batch_id or (data and data.get("batch_id"))

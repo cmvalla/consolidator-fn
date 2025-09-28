@@ -278,11 +278,8 @@ class GraphProcessor:
             class_entity["clustering_embedding"] = embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
             class_entity["retrieval_document_embedding"] = embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
 
-        # Collect all entities for the new graph: existing entities not clustered, and new class entities
-        new_entities = []
-        for entity in entities:
-            if entity["id"] not in class_id_map: # If not mapped to a class, add as is
-                new_entities.append(entity)
+        # Collect all entities for the new graph: all original entities, plus new class entities
+        new_entities = entities.copy()
         new_entities.extend(name_to_class_entity.values())
 
         new_graph = ig.Graph(directed=True) # Create a new graph to build the result
