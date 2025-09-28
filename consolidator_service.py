@@ -23,8 +23,11 @@ class ConsolidatorService:
         self.invocation_id = invocation_id
         logging.info(f"ConsolidatorService initialized with Invocation ID: {self.invocation_id}.")
 
-    def process_message(self, batch_id: str, gcs_paths: list, persistor_topic_path: str, instance_id: str):
-        logging.info(f"Processing message for batch_id: {batch_id}.")
+    def process_message(self, data):
+        logging.info("Processing message in ConsolidatorService. THIS IS A NEW LOG MESSAGE.")
+        batch_id = data.get("batch_id")
+        gcs_paths = data.get("gcs_paths")
+
 
         if not gcs_paths:
             logging.error(f"No GCS paths found in Pub/Sub message for batch {batch_id}. Stopping execution.")
