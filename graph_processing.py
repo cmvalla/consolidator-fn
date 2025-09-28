@@ -300,6 +300,7 @@ class GraphProcessor:
                 new_graph.vs[i]["retrieval_document_embedding"] = entity["retrieval_document_embedding"]
 
         logging.info(f"new_graph vertex names: {new_graph.vs['name']}")
+        name_to_vertex = {v["name"]: v for v in new_graph.vs}
 
         # Remap relationships to the new class entities
         for rel in relationships:
@@ -330,8 +331,8 @@ class GraphProcessor:
             # Create 'INSTANCE_OF' relationships linking instances to their respective classes.
             class_id = class_id_map.get(v["name"])
             if class_id:
-                source_vertex = new_graph.vs.find(name=v["name"])
-                target_vertex = new_graph.vs.find(name=class_id)
+                source_vertex = name_to_vertex.get(v["name"])
+                target_vertex = name_to_vertex.get(class_id)
                 if source_vertex and target_vertex:
                     edge = new_graph.add_edge(source_vertex, target_vertex)
                     edge["type"] = "INSTANCE_OF"
@@ -343,8 +344,8 @@ class GraphProcessor:
             source_class_id = class_id_map.get(rel.get("source"))
             target_class_id = class_id_map.get(rel.get("target"))
             if source_class_id and target_class_id and source_class_id != target_class_id:
-                source_vertex = new_graph.vs.find(name=source_class_id)
-                target_vertex = new_graph.vs.find(name=target_class_id)
+                source_vertex = name_to_vertex.get(source_class_id)
+                target_vertex = name_to_vertex.get(target_class_id)
                 if source_vertex and target_vertex:
                     edge = new_graph.add_edge(source_vertex, target_vertex)
                     edge["type"] = rel.get("type")
