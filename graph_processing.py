@@ -137,6 +137,10 @@ class GraphProcessor:
                     visited[j] = True
             clusters.append(cluster)
 
+        logging.info(f"Found {len(clusters)} clusters.")
+        for i, cluster in enumerate(clusters):
+            logging.info(f"Cluster {i}: {cluster}")
+
         # Initialize LLM chains for generating class properties and summaries.
         # class_property_chain = LLMChain(llm=self.llm_ops.llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
         # summarization_chain = LLMChain(llm=self.llm_ops.llm, prompt=SUMMARY_PROMPT)
@@ -217,6 +221,10 @@ class GraphProcessor:
             if total_clusters > 0 and processed_clusters % (total_clusters // 10 or 1) == 0:
                 progress = (processed_clusters / total_clusters) * 100
                 logging.info(f"Class property generation progress: {progress:.0f}% ({processed_clusters}/{total_clusters})")
+
+        logging.info(f"Generated properties for {len(all_generated_properties)} clusters.")
+        for i, props in enumerate(all_generated_properties):
+            logging.info(f"Cluster {i} properties: {props}")
 
         # Iterate through the generated properties and create or merge 'Class' entities.
         summaries_to_embed = []
@@ -552,6 +560,9 @@ class GraphProcessor:
             community_vertex["communities"] = [] # Communities of a community entity are not relevant in this context.
 
         logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(community_summaries)} standard Community entities.")
+        for v in graph.vs:
+            if v["type"] == "Community":
+                logging.info(f"Community entity: {v.attributes()}")
         return graph
 
     def remove_entities_with_null_keys_and_relationships(self, graph: ig.Graph):
