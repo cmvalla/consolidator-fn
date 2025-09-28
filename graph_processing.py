@@ -301,6 +301,18 @@ class GraphProcessor:
 
         logging.info(f"new_graph vertex names: {new_graph.vs['name']}")
         name_to_vertex = {v["name"]: v for v in new_graph.vs}
+        
+        class_id_to_check = '1b82b99e02b0c91eae32b883fc2d2859fc5f806ae8dccc155977d0c0ceda1c9a'
+        if class_id_to_check in name_to_vertex:
+            logging.info(f"Vertex {class_id_to_check} found in name_to_vertex.")
+        else:
+            logging.warning(f"Vertex {class_id_to_check} NOT found in name_to_vertex.")
+
+        try:
+            new_graph.vs.find(name=class_id_to_check)
+            logging.info(f"Vertex {class_id_to_check} found with find().")
+        except ValueError:
+            logging.warning(f"Vertex {class_id_to_check} NOT found with find().")
 
         # Remap relationships to the new class entities
         for rel in relationships:
