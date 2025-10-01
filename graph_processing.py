@@ -62,7 +62,7 @@ class GraphProcessor:
             # Add other relevant attributes directly to the entity if they are not 'name', 'type', or 'properties'
             for key, value in all_attributes.items():
                 if key not in ["name", "type", "properties", "embedding", "cluster_embedding", "retrieval_document_embedding"]:
-                    entity["properties"][key] = value
+                    entity["properties"].append(value)
             
             # Handle embeddings separately as they are not part of 'properties'
             if "embedding" in all_attributes:
@@ -489,120 +489,119 @@ class GraphProcessor:
         logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities.")
         return data
 
-    def run_igraph_community_detection(self, graph: ig.Graph):
-        """
-        Performs community detection on the graph using igraph's maximal cliques algorithm.
-        It identifies densely connected groups of entities (cliques) and creates new 'Community'
-        entities for each detected community. Entities are then associated with their respective
-        communities.
-
-        Args:
-            graph (igraph.Graph): The input graph containing entities and relationships.
-
-        Returns:
-            igraph.Graph: The updated graph with new 'Community' entities added and
-                          original entities updated with their community affiliations.
-        """
-        logging.info("Running igraph community detection...")
-
-        if not graph.vcount():
-            return graph
-
-        # Find maximal cliques, which represent the communities.
-        cliques = graph.maximal_cliques()
-        
-        community_summaries = {} # Initialize a dictionary to store summaries for each community. 
-        
-        # Add a 'communities' attribute to all vertices if it doesn't exist
-        if "communities" not in graph.vs.attributes():
-            graph.vs["communities"] = [[] for _ in range(graph.vcount())]
-
-        for i, v in enumerate(graph.vs):
-            entity_id = v["name"]
-            
-            # Prepare a summary for the entity to be used in community summaries.
-            entity_summary_parts = []
-            if v.attributes().get("type"):
-                entity_summary_parts.append(f"Type: {v.attributes().get('type')}")
-            summary = v.attributes().get("summary")
-            name = v.attributes().get("name")
-            if summary:
-                entity_summary_parts.append(f"Summary: {summary}")
-            elif name:
-                entity_summary_parts.append(f"Name: {name}")
-            
-            entity_text_for_summary = ", ".join(entity_summary_parts) if entity_summary_parts else entity_id
-
-            # Assign entities to communities (cliques) they belong to.
-            for j, clique in enumerate(cliques):
-                if i in clique:
-                    community_id = f"clique_{j}" # Generate a unique ID for the community. 
-                    v["communities"].append(community_id) # Associate the entity with this community. 
-                    
-                    # Aggregate entity summaries for each community.
-                    if community_id not in community_summaries:
-                        community_summaries[community_id] = []
-                    community_summaries[community_id].append(entity_text_for_summary)
-
-        # Create new 'Community' entities based on the detected communities.
-        community_creation_data = []
-        for comm_id, entity_texts in community_summaries.items():
-            entities_description = " ".join(entity_texts)
-            # Generate summary using LLM
-            full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description})['text']
-
-            if not full_community_summary:
-                logging.warning(f"Skipping Community entity creation for {comm_id} due to empty summary.")
-                continue
-            
-            community_creation_data.append({
-                "id": comm_id,
-                "summary": full_community_summary,
-                "entity_texts": entity_texts
-            })
-
-        # Batch generate embeddings for all new communities
-        if community_creation_data:
-            community_ids = [c['id'] for c in community_creation_data]
-            community_summaries_for_embedding = [c['summary'] for c in community_creation_data]
-            all_community_embeddings = self.llm_ops.get_embeddings(community_summaries_for_embedding, community_ids)
-
-            if not all_community_embeddings:
-                logging.warning("Failed to get embeddings for any communities.")
+        def run_igraph_community_detection(self, graph: ig.Graph):
+            """
+            Performs community detection on the graph using igraph's maximal cliques algorithm.
+            It identifies densely connected groups of entities (cliques) and creates new 'Community'
+            entities for each detected community. Entities are then associated with their respective
+            communities.
+    
+            Args:
+                graph (igraph.Graph): The input graph containing entities and relationships.
+    
+            Returns:
+                igraph.Graph: The updated graph with new 'Community' entities added and
+                              original entities updated with their community affiliations.
+            """
+            logging.info("Running igraph community detection...")
+    
+            if not graph.vcount():
                 return graph
-
-            for community_data in community_creation_data:
-                comm_id = community_data['id']
-                full_community_summary = community_data['summary']
-
-                community_embeddings = all_community_embeddings.get(comm_id)
-                if not community_embeddings:
-                    logging.warning(f"Skipping Community entity creation for {comm_id} due to missing embeddings in batched response.")
+    
+            # Find maximal cliques, which represent the communities.
+            cliques = graph.maximal_cliques()
+            
+            community_summaries = {} # Initialize a dictionary to store summaries for each community. 
+            
+            # Add a 'communities' attribute to all vertices if it doesn't exist
+            if "communities" not in graph.vs.attributes():
+                graph.vs["communities"] = [[] for _ in range(graph.vcount())]
+    
+            for i, v in enumerate(graph.vs):
+                entity_id = v["name"]
+                
+                # Prepare a summary for the entity to be used in community summaries.
+                entity_summary_parts = []
+                if v.attributes().get("type"):
+                    entity_summary_parts.append(f"Type: {v.attributes().get('type')}")
+                summary = v.attributes().get("summary")
+                name = v.attributes().get("name")
+                if summary:
+                    entity_summary_parts.append(f"Summary: {summary}")
+                elif name:
+                    entity_summary_parts.append(f"Name: {name}")
+                
+                entity_text_for_summary = ", ".join(entity_summary_parts) if entity_summary_parts else entity_id
+    
+                # Assign entities to communities (cliques) they belong to.
+                for j, clique in enumerate(cliques):
+                    if i in clique:
+                        community_id = f"clique_{j}" # Generate a unique ID for the community.
+                        v["communities"].append(community_id) # Associate the entity with this community. 
+                        
+                        # Aggregate entity summaries for each community.
+                        if community_id not in community_summaries:
+                            community_summaries[community_id] = []
+                        community_summaries[community_id].append(entity_text_for_summary)
+    
+            # Create new 'Community' entities based on the detected communities.
+            community_creation_data = []
+            for comm_id, entity_texts in community_summaries.items():
+                entities_description = " ".join(entity_texts)
+                # Generate summary using LLM
+                full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description})['text']
+    
+                if not full_community_summary:
+                    logging.warning(f"Skipping Community entity creation for {comm_id} due to empty summary.")
                     continue
-
-                semantic_search_embedding = community_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
-                clustering_embedding = community_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
-
-                community_entity_properties = {
-                    "community_type": "structural",
-                    "Summary": full_community_summary
-                }
-
-                # Add the new community as a vertex to the graph
-                community_vertex = graph.add_vertex(name=comm_id)
-                community_vertex["type"] = "Community"
-                for k, v in community_entity_properties.items():
-                    community_vertex[k] = v
-                community_vertex["cluster_embedding"] = clustering_embedding
-                community_vertex["retrieval_document_embedding"] = semantic_search_embedding
-                community_vertex["communities"] = []
-
-        logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(community_summaries)} standard Community entities.")
-        for v in graph.vs:
-            if v["type"] == "Community":
-                logging.info(f"Community entity: {v.attributes()}")
-        return graph
-
+                
+                community_creation_data.append({
+                    "id": comm_id,
+                    "summary": full_community_summary,
+                    "entity_texts": entity_texts
+                })
+    
+            # Batch generate embeddings for all new communities
+            if community_creation_data:
+                community_ids = [c['id'] for c in community_creation_data]
+                community_summaries_for_embedding = [c['summary'] for c in community_creation_data]
+                all_community_embeddings = self.llm_ops.get_embeddings(community_summaries_for_embedding, community_ids)
+    
+                if not all_community_embeddings:
+                    logging.warning("Failed to get embeddings for any communities.")
+                else:
+                    for community_data in community_creation_data:
+                        comm_id = community_data['id']
+                        full_community_summary = community_data['summary']
+    
+                        community_embeddings = all_community_embeddings.get(comm_id)
+                        if not community_embeddings:
+                            logging.warning(f"Skipping Community entity creation for {comm_id} due to missing embeddings in batched response.")
+                            continue
+    
+                        semantic_search_embedding = community_embeddings.get("semantic_search", [0.0] * Config.EMBEDDING_DIMENSION)
+                        clustering_embedding = community_embeddings.get("clustering", [0.0] * Config.EMBEDDING_DIMENSION)
+    
+                        community_entity_properties = {
+                            "community_type": "structural",
+                            "Summary": full_community_summary
+                        }
+    
+                        # Add the new community as a vertex to the graph
+                        community_vertex = graph.add_vertex(name=comm_id)
+                        community_vertex["type"] = "Community"
+                        for k, v in community_entity_properties.items():
+                            community_vertex[k] = v
+                        community_vertex["cluster_embedding"] = clustering_embedding
+                        community_vertex["retrieval_document_embedding"] = semantic_search_embedding
+                        community_vertex["embedding"] = semantic_search_embedding
+                        community_vertex["communities"] = []
+    
+            logging.info(f"Found {len(cliques)} cliques (overlapping communities) and created {len(community_summaries)} standard Community entities.")
+            for v in graph.vs:
+                if v["type"] == "Community":
+                    logging.info(f"Community entity: {v.attributes()}")
+            return graph
     def remove_entities_with_null_keys_and_relationships(self, graph: ig.Graph):
         """
         Removes entities that have null or empty IDs and any relationships connected to them.
