@@ -80,8 +80,27 @@ class ConsolidatorService:
                 return None
 
             merged_graph = ig.union(graphs_to_merge, byname=True)
+
+            # Manually combine vertex attributes after union
             for v in merged_graph.vs:
-                logging.info(f"Vertex {v[\"name\"]} attributes: {v.attributes()}\n")
+                for attr_prefix in ['embedding', 'cluster_embedding', 'retrieval_document_embedding']:
+                    # If the base attribute already exists, we are good
+                    if attr_prefix in v.attributes() and v[attr_prefix] is not None:
+                        continue
+
+                    # Otherwise, find the first available embedding from the suffixed attributes
+                    for i in range(1, len(graphs_to_merge) + 1):
+                        suffixed_attr = f'{attr_prefix}_{i}'
+                        if suffixed_attr in v.attributes() and v[suffixed_attr] is not None:
+                            v[attr_prefix] = v[suffixed_attr]
+                            break  # Found one, no need to check further
+                    
+                    # Clean up all suffixed attributes
+                    for i in range(1, len(graphs_to_merge) + 1):
+                        suffixed_attr = f'{attr_prefix}_{i}'
+                        if suffixed_attr in v.attributes():
+                            del v[suffixed_attr]
+            
             end_time_phase2 = datetime.datetime.now()
             logging.info(f"Macro Phase 2: Merged {len(graphs_to_merge)} graphs. Resulting graph has {merged_graph.vcount()} vertices and {merged_graph.ecount()} edges. End Time: {end_time_phase2}. Duration: {end_time_phase2 - start_time_phase2}.")
             
