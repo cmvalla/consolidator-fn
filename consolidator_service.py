@@ -81,7 +81,7 @@ class ConsolidatorService:
 
             merged_graph = ig.union(graphs_to_merge, byname=True)
             for v in merged_graph.vs:
-                logging.info(f'Vertex {v["name"]} attributes: {v.attributes()}\n')
+                logging.info(f"Vertex {v[\"name\"]} attributes: {v.attributes()}\n")
             end_time_phase2 = datetime.datetime.now()
             logging.info(f"Macro Phase 2: Merged {len(graphs_to_merge)} graphs. Resulting graph has {merged_graph.vcount()} vertices and {merged_graph.ecount()} edges. End Time: {end_time_phase2}. Duration: {end_time_phase2 - start_time_phase2}.")
             
