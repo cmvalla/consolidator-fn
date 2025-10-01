@@ -177,11 +177,25 @@ class ConsolidatorService:
             num_relationships = final_graph.ecount()
             num_clustering_embeddings = 0
             num_semantic_embeddings = 0
+            entities_without_semantic_embedding = []
             for vertex in final_graph.vs:
                 if "cluster_embedding" in vertex.attributes() and vertex["cluster_embedding"] is not None and any(e != 0.0 for e in vertex["cluster_embedding"]):
                     num_clustering_embeddings += 1
-                if "embedding" in vertex.attributes() and vertex["embedding"] is not None and any(e != 0.0 for e in vertex["embedding"]):
+                
+                has_embedding = "embedding" in vertex.attributes() and vertex["embedding"] is not None and any(e != 0.0 for e in vertex["embedding"])
+                if has_embedding:
                     num_semantic_embeddings += 1
+                else:
+                    entity_info = {
+                        "id": vertex.attributes().get("name", "N/A"),
+                        "description": vertex.attributes().get("description", "N/A")
+                    }
+                    entities_without_semantic_embedding.append(entity_info)
+
+            if entities_without_semantic_embedding:
+                logging.warning(f"Found {len(entities_without_semantic_embedding)} entities without a semantic embedding:")
+                for entity in entities_without_semantic_embedding:
+                    logging.warning(f"  - Entity ID: {entity['id']}, Description: {entity['description']}")
             
             logging.info(f"--- FINAL CONSOLIDATOR SUMMARY FOR BATCH {batch_id} ---")
             logging.info(f"Total Entities: {num_entities}")
