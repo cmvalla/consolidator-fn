@@ -24,7 +24,6 @@ class ConsolidatorService:
         logging.info(f"ConsolidatorService initialized with Invocation ID: {self.invocation_id}.")
 
     def process_message(self, data):
-        logging.info("Processing message in ConsolidatorService. THIS IS A NEW LOG MESSAGE.")
         batch_id = data.get("batch_id")
         gcs_paths = data.get("gcs_paths")
         instance_id = os.environ.get("GAE_INSTANCE")
