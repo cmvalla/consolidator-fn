@@ -79,7 +79,12 @@ class ConsolidatorService:
                 self.spanner_ops.release_lock(batch_id, "FAILED")
                 return None
 
-            merged_graph = ig.union(graphs_to_merge, byname=True)
+            attribute_combiner = {
+                "embedding": "first",
+                "cluster_embedding": "first",
+                "retrieval_document_embedding": "first"
+            }
+            merged_graph = ig.union(graphs_to_merge, byname=True, vertex_attr_comb=attribute_combiner)
             end_time_phase2 = datetime.datetime.now()
             logging.info(f"Macro Phase 2: Merged {len(graphs_to_merge)} graphs. Resulting graph has {merged_graph.vcount()} vertices and {merged_graph.ecount()} edges. End Time: {end_time_phase2}. Duration: {end_time_phase2 - start_time_phase2}.")
             
