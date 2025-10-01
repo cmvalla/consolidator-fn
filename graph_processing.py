@@ -210,7 +210,7 @@ class GraphProcessor:
                 
                 if not isinstance(batch_generated_properties, list):
                     logging.error(f"LLM did not return a list of properties for batch starting at index {i}. Response: {extracted_json_str}")
-                    batch_generated_properties = [{{}} for _ in batch_inputs] # Fill with empty dicts to avoid index errors
+                    batch_generated_properties = [{} for _ in batch_inputs] # Fill with empty dicts to avoid index errors
                 
                 all_generated_properties.extend(batch_generated_properties)
 
@@ -536,7 +536,7 @@ class GraphProcessor:
             # Assign entities to communities (cliques) they belong to.
             for j, clique in enumerate(cliques):
                 if i in clique:
-                    community_id = f"clique_{j}" # Generate a unique ID for the community.
+                    community_id = f"clique_{j}" # Generate a unique ID for the community. 
                     v["communities"].append(community_id) # Associate the entity with this community. 
                     
                     # Aggregate entity summaries for each community.
