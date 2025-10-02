@@ -62,7 +62,7 @@ class GraphProcessor:
             # Add other relevant attributes directly to the entity if they are not 'name', 'type', or 'properties'
             for key, value in all_attributes.items():
                 if key not in ["name", "type", "properties", "embedding", "cluster_embedding", "retrieval_document_embedding"]:
-                    entity["properties"].append(value)
+                    entity["properties"][key] = value
             
             # Handle embeddings separately as they are not part of 'properties'
             if "embedding" in all_attributes:
