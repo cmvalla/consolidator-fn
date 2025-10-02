@@ -489,7 +489,7 @@ class GraphProcessor:
         logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities.")
         return data
 
-        def run_igraph_community_detection(self, graph: ig.Graph):
+    def run_igraph_community_detection(self, graph: ig.Graph):
             """
             Performs community detection on the graph using igraph's maximal cliques algorithm.
             It identifies densely connected groups of entities (cliques) and creates new 'Community'
