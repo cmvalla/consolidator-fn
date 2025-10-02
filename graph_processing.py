@@ -547,7 +547,13 @@ class GraphProcessor:
             # Create new 'Community' entities based on the detected communities.
             community_creation_data = []
             for comm_id, entity_texts in community_summaries.items():
-                entities_description = " ".join(entity_texts)
+                # Create a more descriptive text for the community
+                community_description_parts = []
+                for entity_text in entity_texts:
+                    community_description_parts.append(f"An entity with the following properties: {entity_text}")
+                entities_description = ". ".join(community_description_parts)
+                entities_description += f". These entities form a community, which can be summarized as:"
+
                 # Generate summary using LLM
                 full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description})['text']
     
