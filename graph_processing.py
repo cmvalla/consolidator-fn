@@ -73,6 +73,7 @@ class GraphProcessor:
                 entity["retrieval_document_embedding"] = all_attributes["retrieval_document_embedding"]
 
             entities.append(entity)
+        logging.info(f"Initial graph has {graph.vcount()} vertices and {graph.ecount()} edges.")
         relationships = []
         for e in graph.es:
             rel = {
@@ -83,6 +84,8 @@ class GraphProcessor:
             }
             rel["properties"].pop("type", None)
             relationships.append(rel)
+
+        logging.info(f"Extracted {len(relationships)} relationships from the initial graph.")
 
         id_to_entity = {entity['id']: entity for entity in entities}
         entity_id_to_source_text = {} # Initialize as empty for now, needs to be populated from graph attributes if available
@@ -324,7 +327,8 @@ class GraphProcessor:
                 rel["target"] = class_id_map[rel["target"]]
 
         # Add relationships to the new graph
-        for rel in relationships:
+        logging.info(f"Adding {len(relationships)} relationships to the new graph.")
+        for i, rel in enumerate(relationships):
             try:
                 source_vertex = new_graph.vs.find(name=rel["source"])
                 target_vertex = new_graph.vs.find(name=rel["target"])
@@ -333,8 +337,12 @@ class GraphProcessor:
                     edge["type"] = rel["type"]
                     for k, v in rel["properties"].items():
                         edge[k] = v
+                    if i % 10 == 0:
+                        logging.info(f"Added relationship {i+1}/{len(relationships)} to the new graph.")
+                else:
+                    logging.warning(f"Skipping relationship {i+1}/{len(relationships)} due to missing source or target vertex: {rel}")
             except ValueError:
-                logging.warning(f"Skipping relationship due to missing source or target vertex: {rel}")
+                logging.warning(f"Skipping relationship {i+1}/{len(relationships)} due to missing source or target vertex: {rel}")
 
         # Update existing entities: change their type to 'Instance' if they are not 'Chunk' or 'Community'.
         # This reflects their new role as instances of the newly created 'Class' entities.
@@ -385,7 +393,7 @@ class GraphProcessor:
         Returns:
             dict: The updated data dictionary with duplicate entities resolved and relationships remapped.
         """
-        logging.info("Starting entity de-duplication process...")
+        logging.info(f"Starting entity de-duplication process with {len(entities)} entities and {len(relationships)} relationships...")
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
         id_to_entity = {e["id"]: e for e in entities}
@@ -486,7 +494,7 @@ class GraphProcessor:
 
         data["entities"] = list(final_entities.values())
         data["relationships"] = relationships
-        logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities.")
+        logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities and {len(data['relationships'])} relationships.")
         return data
 
     def run_igraph_community_detection(self, graph: ig.Graph):
@@ -660,6 +668,7 @@ def _graph_to_dict(graph: ig.Graph) -> dict:
     Converts an igraph.Graph object into a dictionary format with 'entities' and 'relationships' keys.
     This format is expected by the deduplicate_entities method.
     """
+    logging.info(f"Converting graph with {graph.vcount()} vertices and {graph.ecount()} edges to dict.")
     entities = []
     for v in graph.vs:
         entity_properties = {k: v[k] for k in v.attributes() if k not in ["name", "type", "embedding", "cluster_embedding", "retrieval_document_embedding"]}
@@ -687,6 +696,7 @@ def _graph_to_dict(graph: ig.Graph) -> dict:
         }
         relationships.append(rel)
 
+    logging.info(f"Converted to dict with {len(entities)} entities and {len(relationships)} relationships.")
     return {"entities": entities, "relationships": relationships}
 
 def _dict_to_graph(data: dict) -> ig.Graph:

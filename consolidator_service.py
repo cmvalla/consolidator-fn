@@ -113,28 +113,38 @@ class ConsolidatorService:
             # Macro Phase 3: Clustering and Deduplication
             start_time_phase3 = datetime.datetime.now()
             logging.info(f"Macro Phase 3: Clustering and deduplicating entities for batch {batch_id}. Start Time: {start_time_phase3}.")
-            clustered_graph = self.graph_processor.cluster_and_merge_entities(embedded_graph)
             
+            logging.info(f"Before clustering, graph has {embedded_graph.vcount()} vertices and {embedded_graph.ecount()} edges.")
+            clustered_graph = self.graph_processor.cluster_and_merge_entities(embedded_graph)
+            logging.info(f"After clustering, graph has {clustered_graph.vcount()} vertices and {clustered_graph.ecount()} edges.")
+
             # Convert igraph.Graph to dictionary format for deduplication
+            logging.info("Before converting to dict, graph has %d vertices and %d edges.", clustered_graph.vcount(), clustered_graph.ecount())
             clustered_graph_dict = _graph_to_dict(clustered_graph)
+            logging.info("After converting to dict, dict has %d entities and %d relationships.", len(clustered_graph_dict.get('entities', [])), len(clustered_graph_dict.get('relationships', [])))
             
             deduplicated_graph_dict = self.graph_processor.deduplicate_entities(clustered_graph_dict)
             end_time_phase3 = datetime.datetime.now()
             logging.info(f"Macro Phase 3: Clustered graph had {clustered_graph.vcount()} entities. Deduplicated graph has {len(deduplicated_graph_dict.get('entities', []))} entities. End Time: {end_time_phase3}. Duration: {end_time_phase3 - start_time_phase3}.")
             
             # Convert back to igraph.Graph for community detection
+            logging.info("Before converting back to graph, dict has %d entities and %d relationships.", len(deduplicated_graph_dict.get('entities', [])), len(deduplicated_graph_dict.get('relationships', [])))
             deduplicated_graph = _dict_to_graph(deduplicated_graph_dict)
+            logging.info("After converting back to graph, graph has %d vertices and %d edges.", deduplicated_graph.vcount(), deduplicated_graph.ecount())
             
             # Macro Phase 4: Community Detection
             start_time_phase4 = datetime.datetime.now()
             logging.info(f"Macro Phase 4: Running community detection for batch {batch_id}. Start Time: {start_time_phase4}.")
+            logging.info(f"Before community detection, graph has {deduplicated_graph.vcount()} vertices and {deduplicated_graph.ecount()} edges.")
             community_graph = self.graph_processor.run_igraph_community_detection(deduplicated_graph)
+            logging.info(f"After community detection, graph has {community_graph.vcount()} vertices and {community_graph.ecount()} edges.")
             end_time_phase4 = datetime.datetime.now()
             logging.info(f"Macro Phase 4: Community detection found {community_graph.vcount()} communities. End Time: {end_time_phase4}. Duration: {end_time_phase4 - start_time_phase4}.")
             
             # Macro Phase 5: Removing Null Entities/Relationships
             start_time_phase5 = datetime.datetime.now()
             logging.info(f"Macro Phase 5: Removing entities with null keys and relationships for batch {batch_id}. Start Time: {start_time_phase5}.")
+            logging.info(f"Before removing nulls, graph has {community_graph.vcount()} vertices and {community_graph.ecount()} edges.")
             final_graph = self.graph_processor.remove_entities_with_null_keys_and_relationships(community_graph)
             if final_graph:
                 logging.info(f"Summary Phase 5: Final graph has {final_graph.vcount()} entities and {final_graph.ecount()} relationships after removing nulls.")
