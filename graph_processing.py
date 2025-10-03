@@ -305,6 +305,7 @@ class GraphProcessor:
                 new_graph.vs[i]["retrieval_document_embedding"] = entity["retrieval_document_embedding"]
 
         logging.info(f"new_graph vertex names: {new_graph.vs['name']}")
+        vertex_names = set(new_graph.vs['name'])
         name_to_vertex = {v["name"]: v for v in new_graph.vs}
         
         class_id_to_check = '1b82b99e02b0c91eae32b883fc2d2859fc5f806ae8dccc155977d0c0ceda1c9a'
@@ -329,20 +330,29 @@ class GraphProcessor:
         # Add relationships to the new graph
         logging.info(f"Adding {len(relationships)} relationships to the new graph.")
         for i, rel in enumerate(relationships):
-            try:
-                source_vertex = new_graph.vs.find(name=rel["source"])
-                target_vertex = new_graph.vs.find(name=rel["target"])
-                if source_vertex and target_vertex:
+            source_id = rel.get("source")
+            target_id = rel.get("target")
+
+            source_in_graph = source_id in vertex_names
+            target_in_graph = target_id in vertex_names
+
+            if source_in_graph and target_in_graph:
+                try:
+                    source_vertex = new_graph.vs.find(name=source_id)
+                    target_vertex = new_graph.vs.find(name=target_id)
                     edge = new_graph.add_edge(source_vertex, target_vertex)
                     edge["type"] = rel["type"]
                     for k, v in rel["properties"].items():
                         edge[k] = v
                     if i % 10 == 0:
                         logging.info(f"Added relationship {i+1}/{len(relationships)} to the new graph.")
-                else:
-                    logging.warning(f"Skipping relationship {i+1}/{len(relationships)} due to missing source or target vertex: {rel}")
-            except ValueError:
-                logging.warning(f"Skipping relationship {i+1}/{len(relationships)} due to missing source or target vertex: {rel}")
+                except ValueError:
+                    logging.warning(f"Skipping relationship {i+1}/{len(relationships)} due to ValueError (name not found), even though check passed: {rel}")
+            else:
+                if not source_in_graph:
+                    logging.warning(f"Skipping relationship {i+1}/{len(relationships)} because source ID '{source_id}' is not in the new graph. Relationship: {rel}")
+                if not target_in_graph:
+                    logging.warning(f"Skipping relationship {i+1}/{len(relationships)} because target ID '{target_id}' is not in the new graph. Relationship: {rel}")
 
         # Update existing entities: change their type to 'Instance' if they are not 'Chunk' or 'Community'.
         # This reflects their new role as instances of the newly created 'Class' entities.
@@ -393,8 +403,9 @@ class GraphProcessor:
         Returns:
             dict: The updated data dictionary with duplicate entities resolved and relationships remapped.
         """
-        logging.info(f"Starting entity de-duplication process with {len(entities)} entities and {len(relationships)} relationships...")
         entities = data.get("entities", [])
+        relationships = data.get("relationships", [])
+        logging.info(f"Starting entity de-duplication process with {len(entities)} entities and {len(relationships)} relationships...")
         relationships = data.get("relationships", [])
         id_to_entity = {e["id"]: e for e in entities}
 
