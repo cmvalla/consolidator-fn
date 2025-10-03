@@ -406,7 +406,6 @@ class GraphProcessor:
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
         logging.info(f"Starting entity de-duplication process with {len(entities)} entities and {len(relationships)} relationships...")
-        relationships = data.get("relationships", [])
         id_to_entity = {e["id"]: e for e in entities}
 
         # Group entities by their EID to identify duplicates.
