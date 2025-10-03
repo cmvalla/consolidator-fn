@@ -7,6 +7,8 @@ import igraph as ig
 from google.cloud import pubsub_v1
 from google.cloud import storage
 
+import psutil
+
 from llm_operations import LLMOperations
 from graph_processing import GraphProcessor, _graph_to_dict, _dict_to_graph
 from spanner_operations import SpannerOperations
@@ -22,6 +24,10 @@ class ConsolidatorService:
         self.storage_client = storage_client
         self.invocation_id = invocation_id
         logging.info(f"ConsolidatorService initialized with Invocation ID: {self.invocation_id}.")
+
+    def _log_memory_usage(self, stage: str):
+        memory_info = psutil.virtual_memory()
+        logging.info(f"Memory usage at stage '{stage}': Total={memory_info.total / 1024**3:.2f}GB, Available={memory_info.available / 1024**3:.2f}GB, Used={memory_info.used / 1024**3:.2f}GB, Percentage={memory_info.percent}%")
 
     def process_message(self, data):
         batch_id = data.get("batch_id")
@@ -78,6 +84,8 @@ class ConsolidatorService:
                 self.spanner_ops.release_lock(batch_id, "FAILED")
                 return None
 
+            self._log_memory_usage("After deserializing graphs")
+
             merged_graph = ig.union(graphs_to_merge, byname=True)
 
             # Manually combine vertex attributes after union
@@ -102,6 +110,7 @@ class ConsolidatorService:
             
             end_time_phase2 = datetime.datetime.now()
             logging.info(f"Macro Phase 2: Merged {len(graphs_to_merge)} graphs. Resulting graph has {merged_graph.vcount()} vertices and {merged_graph.ecount()} edges. End Time: {end_time_phase2}. Duration: {end_time_phase2 - start_time_phase2}.")
+            self._log_memory_usage("After merging graphs")
             
             if not merged_graph.vcount():
                 logging.info(f"No graph data found after merging for batch {batch_id}. Stopping execution.")
@@ -113,41 +122,53 @@ class ConsolidatorService:
             # Macro Phase 3: Clustering and Deduplication
             start_time_phase3 = datetime.datetime.now()
             logging.info(f"Macro Phase 3: Clustering and deduplicating entities for batch {batch_id}. Start Time: {start_time_phase3}.")
+            self._log_memory_usage("Before clustering")
             
             logging.info(f"Before clustering, graph has {embedded_graph.vcount()} vertices and {embedded_graph.ecount()} edges.")
             clustered_graph = self.graph_processor.cluster_and_merge_entities(embedded_graph)
             logging.info(f"After clustering, graph has {clustered_graph.vcount()} vertices and {clustered_graph.ecount()} edges.")
+            self._log_memory_usage("After clustering")
 
             # Convert igraph.Graph to dictionary format for deduplication
             logging.info("Before converting to dict, graph has %d vertices and %d edges.", clustered_graph.vcount(), clustered_graph.ecount())
+            self._log_memory_usage("Before _graph_to_dict")
             clustered_graph_dict = _graph_to_dict(clustered_graph)
+            self._log_memory_usage("After _graph_to_dict")
             logging.info("After converting to dict, dict has %d entities and %d relationships.", len(clustered_graph_dict.get('entities', [])), len(clustered_graph_dict.get('relationships', [])))
             
+            self._log_memory_usage("Before deduplication")
             deduplicated_graph_dict = self.graph_processor.deduplicate_entities(clustered_graph_dict)
+            self._log_memory_usage("After deduplication")
             end_time_phase3 = datetime.datetime.now()
             logging.info(f"Macro Phase 3: Clustered graph had {clustered_graph.vcount()} entities. Deduplicated graph has {len(deduplicated_graph_dict.get('entities', []))} entities. End Time: {end_time_phase3}. Duration: {end_time_phase3 - start_time_phase3}.")
             
             # Convert back to igraph.Graph for community detection
             logging.info("Before converting back to graph, dict has %d entities and %d relationships.", len(deduplicated_graph_dict.get('entities', [])), len(deduplicated_graph_dict.get('relationships', [])))
+            self._log_memory_usage("Before _dict_to_graph")
             deduplicated_graph = _dict_to_graph(deduplicated_graph_dict)
+            self._log_memory_usage("After _dict_to_graph")
             logging.info("After converting back to graph, graph has %d vertices and %d edges.", deduplicated_graph.vcount(), deduplicated_graph.ecount())
             
             # Macro Phase 4: Community Detection
             start_time_phase4 = datetime.datetime.now()
             logging.info(f"Macro Phase 4: Running community detection for batch {batch_id}. Start Time: {start_time_phase4}.")
+            self._log_memory_usage("Before community detection")
             logging.info(f"Before community detection, graph has {deduplicated_graph.vcount()} vertices and {deduplicated_graph.ecount()} edges.")
             community_graph = self.graph_processor.run_igraph_community_detection(deduplicated_graph)
             logging.info(f"After community detection, graph has {community_graph.vcount()} vertices and {community_graph.ecount()} edges.")
+            self._log_memory_usage("After community detection")
             end_time_phase4 = datetime.datetime.now()
             logging.info(f"Macro Phase 4: Community detection found {community_graph.vcount()} communities. End Time: {end_time_phase4}. Duration: {end_time_phase4 - start_time_phase4}.")
             
             # Macro Phase 5: Removing Null Entities/Relationships
             start_time_phase5 = datetime.datetime.now()
             logging.info(f"Macro Phase 5: Removing entities with null keys and relationships for batch {batch_id}. Start Time: {start_time_phase5}.")
+            self._log_memory_usage("Before removing nulls")
             logging.info(f"Before removing nulls, graph has {community_graph.vcount()} vertices and {community_graph.ecount()} edges.")
             final_graph = self.graph_processor.remove_entities_with_null_keys_and_relationships(community_graph)
             if final_graph:
                 logging.info(f"Summary Phase 5: Final graph has {final_graph.vcount()} entities and {final_graph.ecount()} relationships after removing nulls.")
+            self._log_memory_usage("After removing nulls")
             end_time_phase5 = datetime.datetime.now()
             logging.info(f"Macro Phase 5: Null entities/relationships removed for batch {batch_id}. End Time: {end_time_phase5}. Duration: {end_time_phase5 - start_time_phase5}.")
             
