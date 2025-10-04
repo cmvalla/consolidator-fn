@@ -91,7 +91,7 @@ class GraphProcessor:
             summaries = self.llm_ops.summarization_chain.batch(texts_for_description)
 
             for i, entity in enumerate(entities_without_description):
-                entity["properties"]["description"] = summaries[i]["text"]
+                entity["properties"]["description"] = summaries[i].content
 
         relationships = []
         for e in graph.es:
