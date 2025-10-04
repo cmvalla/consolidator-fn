@@ -73,7 +73,6 @@ class GraphProcessor:
                 entity["retrieval_document_embedding"] = all_attributes["retrieval_document_embedding"]
 
             entities.append(entity)
-        logging.info(f"Initial graph has {graph.vcount()} vertices and {graph.ecount()} edges.")
         relationships = []
         for e in graph.es:
             rel = {
@@ -84,8 +83,6 @@ class GraphProcessor:
             }
             rel["properties"].pop("type", None)
             relationships.append(rel)
-
-        logging.info(f"Extracted {len(relationships)} relationships from the initial graph.")
 
         id_to_entity = {entity['id']: entity for entity in entities}
         entity_id_to_source_text = {} # Initialize as empty for now, needs to be populated from graph attributes if available
@@ -243,6 +240,10 @@ class GraphProcessor:
                 if not class_name or not class_name.strip():
                     logging.warning(f"Skipping class creation for cluster due to empty class name. Cluster info: {cluster_info}")
                     continue
+
+                if "name" in generated_properties:
+                    generated_properties["class_name"] = generated_properties.pop("name")
+
                 # Generate a consistent and unique EID for the class based on its name.
                 class_eid = generate_class_eid(class_name)
 
@@ -304,8 +305,6 @@ class GraphProcessor:
             if "retrieval_document_embedding" in entity:
                 new_graph.vs[i]["retrieval_document_embedding"] = entity["retrieval_document_embedding"]
 
-        logging.info(f"new_graph vertex names: {new_graph.vs['name']}")
-        vertex_names = set(new_graph.vs['name'])
         name_to_vertex = {v["name"]: v for v in new_graph.vs}
         
         class_id_to_check = '1b82b99e02b0c91eae32b883fc2d2859fc5f806ae8dccc155977d0c0ceda1c9a'
@@ -328,31 +327,17 @@ class GraphProcessor:
                 rel["target"] = class_id_map[rel["target"]]
 
         # Add relationships to the new graph
-        logging.info(f"Adding {len(relationships)} relationships to the new graph.")
-        for i, rel in enumerate(relationships):
-            source_id = rel.get("source")
-            target_id = rel.get("target")
-
-            source_in_graph = source_id in vertex_names
-            target_in_graph = target_id in vertex_names
-
-            if source_in_graph and target_in_graph:
-                try:
-                    source_vertex = new_graph.vs.find(name=source_id)
-                    target_vertex = new_graph.vs.find(name=target_id)
+        for rel in relationships:
+            try:
+                source_vertex = new_graph.vs.find(name=rel["source"])
+                target_vertex = new_graph.vs.find(name=rel["target"])
+                if source_vertex and target_vertex:
                     edge = new_graph.add_edge(source_vertex, target_vertex)
                     edge["type"] = rel["type"]
                     for k, v in rel["properties"].items():
                         edge[k] = v
-                    if i % 10 == 0:
-                        logging.info(f"Added relationship {i+1}/{len(relationships)} to the new graph.")
-                except ValueError:
-                    logging.warning(f"Skipping relationship {i+1}/{len(relationships)} due to ValueError (name not found), even though check passed: {rel}")
-            else:
-                if not source_in_graph:
-                    logging.warning(f"Skipping relationship {i+1}/{len(relationships)} because source ID '{source_id}' is not in the new graph. Relationship: {rel}")
-                if not target_in_graph:
-                    logging.warning(f"Skipping relationship {i+1}/{len(relationships)} because target ID '{target_id}' is not in the new graph. Relationship: {rel}")
+            except ValueError:
+                logging.warning(f"Skipping relationship due to missing source or target vertex: {rel}")
 
         # Update existing entities: change their type to 'Instance' if they are not 'Chunk' or 'Community'.
         # This reflects their new role as instances of the newly created 'Class' entities.
@@ -403,9 +388,9 @@ class GraphProcessor:
         Returns:
             dict: The updated data dictionary with duplicate entities resolved and relationships remapped.
         """
+        logging.info("Starting entity de-duplication process...")
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
-        logging.info(f"Starting entity de-duplication process with {len(entities)} entities and {len(relationships)} relationships...")
         id_to_entity = {e["id"]: e for e in entities}
 
         # Group entities by their EID to identify duplicates.
@@ -504,7 +489,7 @@ class GraphProcessor:
 
         data["entities"] = list(final_entities.values())
         data["relationships"] = relationships
-        logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities and {len(data['relationships'])} relationships.")
+        logging.info(f"De-duplication complete. Result: {len(data['entities'])} entities.")
         return data
 
     def run_igraph_community_detection(self, graph: ig.Graph):
@@ -678,7 +663,6 @@ def _graph_to_dict(graph: ig.Graph) -> dict:
     Converts an igraph.Graph object into a dictionary format with 'entities' and 'relationships' keys.
     This format is expected by the deduplicate_entities method.
     """
-    logging.info(f"Converting graph with {graph.vcount()} vertices and {graph.ecount()} edges to dict.")
     entities = []
     for v in graph.vs:
         entity_properties = {k: v[k] for k in v.attributes() if k not in ["name", "type", "embedding", "cluster_embedding", "retrieval_document_embedding"]}
@@ -706,7 +690,6 @@ def _graph_to_dict(graph: ig.Graph) -> dict:
         }
         relationships.append(rel)
 
-    logging.info(f"Converted to dict with {len(entities)} entities and {len(relationships)} relationships.")
     return {"entities": entities, "relationships": relationships}
 
 def _dict_to_graph(data: dict) -> ig.Graph:
