@@ -7,9 +7,6 @@ import igraph as ig
 from google.cloud import pubsub_v1
 from google.cloud import storage
 
-import pickle
-import igraph as ig
-
 from llm_operations import LLMOperations
 from graph_processing import GraphProcessor, _graph_to_dict, _dict_to_graph
 from spanner_operations import SpannerOperations
@@ -81,7 +78,7 @@ class ConsolidatorService:
                 self.spanner_ops.release_lock(batch_id, "FAILED")
                 return None
 
-            self._log_memory_usage("After deserializing graphs")
+    
 
             merged_graph = ig.union(graphs_to_merge, byname=True)
 
@@ -107,7 +104,7 @@ class ConsolidatorService:
             
             end_time_phase2 = datetime.datetime.now()
             logging.info(f"Macro Phase 2: Merged {len(graphs_to_merge)} graphs. Resulting graph has {merged_graph.vcount()} vertices and {merged_graph.ecount()} edges. End Time: {end_time_phase2}. Duration: {end_time_phase2 - start_time_phase2}.")
-            self._log_memory_usage("After merging graphs")
+
             
             if not merged_graph.vcount():
                 logging.info(f"No graph data found after merging for batch {batch_id}. Stopping execution.")
@@ -117,35 +114,21 @@ class ConsolidatorService:
             embedded_graph = merged_graph            
             
             # Macro Phase 3: Clustering and Deduplication
-            start_time_phase3 = datetime.datetime.now()
-            logging.info(f"Macro Phase 3: Clustering and deduplicating entities for batch {batch_id}. Start Time: {start_time_phase3}.")
             clustered_graph = self.graph_processor.cluster_and_merge_entities(embedded_graph)
             
             # Convert igraph.Graph to dictionary format for deduplication
             clustered_graph_dict = _graph_to_dict(clustered_graph)
             
             deduplicated_graph_dict = self.graph_processor.deduplicate_entities(clustered_graph_dict)
-            end_time_phase3 = datetime.datetime.now()
-            logging.info(f"Macro Phase 3: Clustered graph had {clustered_graph.vcount()} entities. Deduplicated graph has {len(deduplicated_graph_dict.get('entities', []))} entities. End Time: {end_time_phase3}. Duration: {end_time_phase3 - start_time_phase3}.")
             
             # Convert back to igraph.Graph for community detection
             deduplicated_graph = _dict_to_graph(deduplicated_graph_dict)
             
             # Macro Phase 4: Community Detection
-            start_time_phase4 = datetime.datetime.now()
-            logging.info(f"Macro Phase 4: Running community detection for batch {batch_id}. Start Time: {start_time_phase4}.")
             community_graph = self.graph_processor.run_igraph_community_detection(deduplicated_graph)
-            end_time_phase4 = datetime.datetime.now()
-            logging.info(f"Macro Phase 4: Community detection found {community_graph.vcount()} communities. End Time: {end_time_phase4}. Duration: {end_time_phase4 - start_time_phase4}.")
             
             # Macro Phase 5: Removing Null Entities/Relationships
-            start_time_phase5 = datetime.datetime.now()
-            logging.info(f"Macro Phase 5: Removing entities with null keys and relationships for batch {batch_id}. Start Time: {start_time_phase5}.")
             final_graph = self.graph_processor.remove_entities_with_null_keys_and_relationships(community_graph)
-            if final_graph:
-                logging.info(f"Summary Phase 5: Final graph has {final_graph.vcount()} entities and {final_graph.ecount()} relationships after removing nulls.")
-            end_time_phase5 = datetime.datetime.now()
-            logging.info(f"Macro Phase 5: Null entities/relationships removed for batch {batch_id}. End Time: {end_time_phase5}. Duration: {end_time_phase5 - start_time_phase5}.")
             
             if final_graph:
                 # Macro Phase 6: Serializing and Uploading to GCS
