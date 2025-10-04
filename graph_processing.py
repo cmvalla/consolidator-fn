@@ -73,6 +73,26 @@ class GraphProcessor:
                 entity["retrieval_document_embedding"] = all_attributes["retrieval_document_embedding"]
 
             entities.append(entity)
+
+        entities_without_description = []
+        for entity in entities:
+            if not entity.get("properties", {}).get("description"):
+                entities_without_description.append(entity)
+
+        if entities_without_description:
+            logging.info(f"Found {len(entities_without_description)} entities without description. Generating them now.")
+            texts_for_description = []
+            for entity in entities_without_description:
+                entity_type = entity.get("type", "")
+                properties = entity.get("properties", {})
+                text = f"Generate a short description for an entity of type '{entity_type}' with the following properties: {json.dumps(properties)}"
+                texts_for_description.append(text)
+            
+            summaries = self.llm_ops.summarization_chain.batch(texts_for_description)
+
+            for i, entity in enumerate(entities_without_description):
+                entity["properties"]["description"] = summaries[i]["text"]
+
         relationships = []
         for e in graph.es:
             rel = {
