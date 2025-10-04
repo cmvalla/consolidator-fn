@@ -89,7 +89,7 @@ class GraphProcessor:
                 texts_for_description.append(text)
             
             summaries = self.llm_ops.summarization_chain.batch(texts_for_description)
-
+            logging.info(f"Summaries: {summaries}")
             for i, entity in enumerate(entities_without_description):
                 entity["properties"]["description"] = summaries[i].content
 
