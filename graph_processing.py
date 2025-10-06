@@ -91,7 +91,7 @@ class GraphProcessor:
             summaries = self.llm_ops.summarization_chain.batch(texts_for_description)
             logging.info(f"SUMMARIES_DEBUG: {summaries}")
             for i, entity in enumerate(entities_without_description):
-                entity["properties"]["description"] = summaries[i].content
+                entity["properties"]["description"] = summaries[i]['text']
 
         relationships = []
         for e in graph.es:
@@ -578,7 +578,8 @@ class GraphProcessor:
                 entities_description += f". These entities form a community, which can be summarized as:"
 
                 # Generate summary using LLM
-                full_community_summary = self.summarization_chain.invoke({"text_chunk": entities_description}).content
+                summary_response = self.summarization_chain.invoke({"text_chunk": entities_description})
+                full_community_summary = summary_response.get('text', '')
     
                 if not full_community_summary:
                     logging.warning(f"Skipping Community entity creation for {comm_id} due to empty summary.")
