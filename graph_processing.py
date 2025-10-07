@@ -190,7 +190,8 @@ class GraphProcessor:
                         source_text_parts.add(source_text)
                     
                     entity_type = member_entity.get('type', '')
-                    cluster_text_parts.append(f"Type: {entity_type}, Properties: {json.dumps(properties)}")
+                    description = properties.get('description', '')
+                    cluster_text_parts.append(f"Type: {entity_type}, Description: {description}, Properties: {json.dumps(properties)}")
 
             instances_text = "\n".join(instances_text_parts)
             source_text_context = "\n\n---\n\n".join(source_text_parts)
@@ -282,6 +283,9 @@ class GraphProcessor:
                     if not class_eid:
                         logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
                         continue
+
+                    if not generated_properties.get("description"):
+                        generated_properties["description"] = summary
                     
                     summaries_to_embed.append(summary)
                     class_eids_to_embed.append(class_eid)
