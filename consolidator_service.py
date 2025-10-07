@@ -136,7 +136,7 @@ class ConsolidatorService:
                 logging.info(f"Macro Phase 6: Serializing and uploading graph to GCS for batch {batch_id}. Start Time: {start_time_phase6}.")
                 try:
                     final_graph_dict = _graph_to_dict(final_graph)
-                    serialized_graph = json.dumps(final_graph_dict).encode('utf-8')
+                    serialized_graph = pickle.dumps(final_graph_dict) # Change to pickle.dumps
                     
                     gcs_bucket_name = os.environ.get("GRAPH_DATA_BUCKET_NAME")
                     if not gcs_bucket_name:
@@ -147,10 +147,10 @@ class ConsolidatorService:
                     bucket = self.storage_client.bucket(gcs_bucket_name)
                     
                     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-                    object_name = f"graph_data/{batch_id.replace('/', '_').replace(':', '_')}_{timestamp}.json"
+                    object_name = f"graph_data/{batch_id.replace('/', '_').replace(':', '_')}_{timestamp}.pkl" # Change extension to .pkl
                     blob = bucket.blob(object_name)
                     
-                    blob.upload_from_string(serialized_graph, content_type='application/json')
+                    blob.upload_from_string(serialized_graph, content_type='application/octet-stream') # Change content_type
                     gcs_path = f"gs://{gcs_bucket_name}/{object_name}"
                     logging.info(f"Uploaded serialized graph to GCS: {gcs_path}.")
 
