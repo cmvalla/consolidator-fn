@@ -264,13 +264,6 @@ class GraphProcessor:
                 if "name" in generated_properties:
                     generated_properties["class_name"] = generated_properties.pop("name")
 
-                # Generate a consistent and unique EID for the class based on its name.
-                class_eid = generate_class_eid(class_name)
-
-                if not class_eid:
-                    logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
-                    continue
-
                 # If a class with the same name already exists, merge the current cluster's members
                 # into the existing class by re-linking their instances.
                 if class_name in name_to_class_entity:
@@ -282,6 +275,14 @@ class GraphProcessor:
                     # If it's a new class, create a new 'Class' entity.
                     # Generate a summary for the class using an LLM.
                     summary = self.llm_ops.summarization_chain.invoke({"text_chunk": cluster_info["cluster_text"]}).content
+
+                    # Generate a consistent and unique EID for the class based on its name.
+                    class_eid = generate_class_eid(class_name)
+
+                    if not class_eid:
+                        logging.warning(f"Could not generate a valid EID for class from name: '{class_name}'. Skipping cluster.")
+                        continue
+                    
                     summaries_to_embed.append(summary)
                     class_eids_to_embed.append(class_eid)
                     class_entity = {
