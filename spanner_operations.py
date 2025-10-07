@@ -102,13 +102,35 @@ class SpannerOperations:
     def release_lock(self, batch_id: str, status: str):
         """
         Releases the lock for a given batch_id in the WorkflowStatus table.
+        This function is robust and will insert a new row if one does not already exist.
         """
         def _release_lock_in_transaction(transaction: Transaction):
-            transaction.update(
-                table="WorkflowStatus",
-                columns=["batch_id", "status", "lock_owner", "lock_timestamp"],
-                values=[[batch_id, status, None, None]],
-            )
+            try:
+                # First, try to read the row.
+                result = transaction.read(
+                    table="WorkflowStatus",
+                    keyset=KeySet(keys=[[batch_id]]),
+                    columns=["batch_id"],
+                )
+                row = next(iter(result), None)
+
+                if row:
+                    # If the row exists, update it.
+                    transaction.update(
+                        table="WorkflowStatus",
+                        columns=["batch_id", "status", "lock_owner", "lock_timestamp"],
+                        values=[[batch_id, status, None, None]],
+                    )
+                else:
+                    # If the row does not exist, insert it.
+                    transaction.insert(
+                        table="WorkflowStatus",
+                        columns=["batch_id", "status", "lock_owner", "lock_timestamp"],
+                        values=[[batch_id, status, None, None]],
+                    )
+            except Exception as e:
+                logging.error(f"An unexpected error occurred during lock release for {batch_id}: {e}", exc_info=True)
+                raise
 
         try:
             self.database.run_in_transaction(_release_lock_in_transaction)
