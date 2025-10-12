@@ -17,4 +17,7 @@ requests
 scikit-learn
 numpy
 python-igraph
+langgraph
+cdlib
+faiss-cpu
 # Force rebuild

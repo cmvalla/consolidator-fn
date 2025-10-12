@@ -9,3 +9,4 @@ tests/__pycache__/*.py
 credentials.json
 venv
 **/__pycache__
+.env

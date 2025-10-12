@@ -86,9 +86,10 @@ class LLMOperations:
                     all_embeddings = response.json().get("embeddings")
                     logging.info(f"Raw embeddings value for entity {entity_id}: {all_embeddings}")
                     if all_embeddings and isinstance(all_embeddings, dict):
-                        # Ensure both types are present, return zero embeddings if not
                         clustering_embedding = all_embeddings.get("clustering", [[0.0] * Config.EMBEDDING_DIMENSION])[0]
                         semantic_search_embedding = all_embeddings.get("semantic_search", [[0.0] * Config.EMBEDDING_DIMENSION])[0]
+                        logging.info(f"Extracted clustering embedding for entity {entity_id}: {clustering_embedding[:5]}...")
+                        logging.info(f"Extracted semantic search embedding for entity {entity_id}: {semantic_search_embedding[:5]}...")
                         return {"clustering": clustering_embedding, "semantic_search": semantic_search_embedding}
                     else:
                         logging.warning(f"Embeddings not found or invalid in response for entity: {entity_id}. Full response: {response.text}")
@@ -139,7 +140,15 @@ class LLMOperations:
 
     def generate_class_properties(self, batched_clusters_data, schema):
         """Generates class properties for a batch of clusters using the LLM."""
-        batched_clusters_json = json.dumps(batched_clusters_data, indent=2)
+        # Filter out null values from properties before sending to LLM
+        cleaned_batched_clusters_data = []
+        for cluster in batched_clusters_data:
+            cleaned_cluster = cluster.copy()
+            if "properties" in cleaned_cluster and isinstance(cleaned_cluster["properties"], dict):
+                cleaned_cluster["properties"] = {k: v for k, v in cleaned_cluster["properties"].items() if v is not None}
+            cleaned_batched_clusters_data.append(cleaned_cluster)
+
+        batched_clusters_json = json.dumps(cleaned_batched_clusters_data, indent=2)
         prompt_inputs = {"batched_clusters_json": batched_clusters_json, "schema": schema}
         
         class_property_chain = LLMChain(llm=self.llm, prompt=CLASS_PROPERTY_GENERATION_PROMPT)
@@ -159,8 +168,13 @@ class LLMOperations:
         if json_match:
             json_str = json_match.group(1)
             try:
-                # Attempt to parse to validate and then re-serialize to ensure it's clean
-                return json.dumps(json.loads(json_str))
+                parsed_json = json.loads(json_str)
+                # Filter out null values from properties
+                if isinstance(parsed_json, list):
+                    for class_entity in parsed_json:
+                        if "properties" in class_entity and isinstance(class_entity["properties"], dict):
+                            class_entity["properties"] = {k: v for k, v in class_entity["properties"].items() if v is not None}
+                return json.dumps(parsed_json)
             except json.JSONDecodeError:
                 logging.warning("Found markdown JSON block, but it was invalid. Attempting fallback extraction.")
 
@@ -169,7 +183,14 @@ class LLMOperations:
         json_end = text.rfind(']') # Changed to ']' as the expected output is a JSON array
         if json_start != -1 and json_end != -1 and json_end > json_start:
             json_str = text[json_start:json_end+1]
-            return json_str
-        
-        logging.warning(f"No valid JSON found in LLM response: {text}")
-        return "[]" # Return an empty JSON array as a safe default
+            try:
+                parsed_json = json.loads(json_str)
+                # Filter out null values from properties
+                if isinstance(parsed_json, list):
+                    for class_entity in parsed_json:
+                        if "properties" in class_entity and isinstance(class_entity["properties"], dict):
+                            class_entity["properties"] = {k: v for k, v in class_entity["properties"].items() if v is not None}
+                return json.dumps(parsed_json)
+            except json.JSONDecodeError:
+                logging.warning("Fallback JSON extraction was invalid.")
+                return "[]" # Return an empty JSON array as a safe default

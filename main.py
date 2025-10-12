@@ -26,16 +26,28 @@ import uuid
 
 # --- Boilerplate and Configuration ---
 
+# Configure logging based on LOCAL_DEBUG environment variable
+if os.environ.get("LOCAL_DEBUG", "false").lower() == "true":
+    # Simplified file logging for debugging
+    logging.basicConfig(
+        level=logging.INFO,
+        filename='consolidator.log',
+        filemode='w', # Overwrite the file on each run
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    logging.info("LOCAL_DEBUG is true. Logging to consolidator.log with simplified config.")
+else:
+    # Standard Google Cloud logging setup
+    client = google.cloud.logging.Client()
+    client.setup_logging()
+    logging.info("LOCAL_DEBUG is false. Logging to Cloud Logging.")
+
 @functions_framework.cloud_event
 def consolidator(cloud_event):
     invocation_id = str(uuid.uuid4())
     data = None # Initialize data to None
     batch_id = None # Initialize batch_id to None
     
-    # Configure logging to use Cloud Logging
-    client = google.cloud.logging.Client()
-    client.setup_logging()
-
     logging.info(f"Consolidator function started. Invocation ID: {invocation_id}")
     logging.info(f"GRAPH_DATA_BUCKET_NAME from env: {os.environ.get('GRAPH_DATA_BUCKET_NAME')}")
     
